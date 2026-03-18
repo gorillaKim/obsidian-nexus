@@ -154,11 +154,10 @@ fn open_file(
     let vault_name = proj.vault_name.as_deref().unwrap_or(&proj.name);
     let abs_path = std::path::Path::new(&proj.path).join(&file_path);
 
-    // Try Obsidian deeplink
+    // Use path-based URI (works without vault being pre-registered by name)
     let obsidian_uri = format!(
-        "obsidian://open?vault={}&file={}",
-        urlencoding::encode(vault_name),
-        urlencoding::encode(&file_path),
+        "obsidian://open?path={}",
+        urlencoding::encode(abs_path.to_str().unwrap_or("")),
     );
 
     // Check if Obsidian is installed (macOS)
@@ -167,10 +166,10 @@ fn open_file(
             .map(|h| h.join("Applications/Obsidian.app").exists())
             .unwrap_or(false);
 
-    if obsidian_installed {
-        // Open via Obsidian deeplink
+    if obsidian_installed && abs_path.exists() {
+        // Open via Obsidian path-based deeplink
         let _ = std::process::Command::new("open").arg(&obsidian_uri).spawn();
-        Ok(serde_json::json!({ "opened_with": "obsidian", "uri": obsidian_uri }))
+        Ok(serde_json::json!({ "opened_with": "obsidian", "path": abs_path.to_string_lossy() }))
     } else if abs_path.exists() {
         // Fallback: open with system default editor
         let _ = std::process::Command::new("open").arg(&abs_path).spawn();
