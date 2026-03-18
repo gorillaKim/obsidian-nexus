@@ -47,7 +47,7 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectInfos, setProjectInfos] = useState<Map<string, ProjectInfo>>(new Map());
   const [query, setQuery] = useState("");
-  const [selectedProject] = useState<string>("");
+  const [selectedProject, setSelectedProject] = useState<string>("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [indexing, setIndexing] = useState<Set<string>>(new Set());
@@ -256,47 +256,88 @@ function App() {
           <div className="flex" style={{ height: "calc(100vh - 73px)" }}>
             {/* 왼쪽 사이드바: 트리 + 검색 */}
             <div className="w-64 flex-shrink-0 border-r overflow-y-auto p-3" style={{ borderColor: "var(--border)" }}>
-              {/* 검색 입력 */}
-              <div className="flex gap-1 mb-3">
-                <input type="text" value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                  placeholder="검색..."
-                  className="flex-1 px-3 py-1.5 rounded text-xs"
-                  style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: `1px solid var(--border)` }} />
-                <button onClick={handleSearch} disabled={searching}
-                  className="px-2 py-1.5 rounded text-xs"
-                  style={{ background: "var(--accent)", color: "#1a1b26" }}>
-                  {searching ? "..." : "검색"}
-                </button>
+              {/* 검색 입력 + 프로젝트 필터 */}
+              <div className="mb-3">
+                <div className="flex gap-1 mb-1">
+                  <input type="text" value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                    placeholder="검색..."
+                    className="flex-1 px-3 py-1.5 rounded text-xs"
+                    style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: `1px solid var(--border)` }} />
+                  <button onClick={handleSearch} disabled={searching}
+                    className="px-2 py-1.5 rounded text-xs"
+                    style={{ background: "var(--accent)", color: "#1a1b26" }}>
+                    {searching ? "..." : "검색"}
+                  </button>
+                </div>
+                <select value={selectedProject}
+                  onChange={(e) => { const v = e.target.value; setSelectedProject(v); }}
+                  className="w-full px-2 py-1 rounded text-xs"
+                  style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: `1px solid var(--border)` }}>
+                  <option value="">전체 프로젝트</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
               </div>
 
-              {/* 검색 결과 */}
-              {results.length > 0 && (
-                <div className="mb-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium opacity-60">검색 결과 ({results.length})</span>
-                    <button onClick={() => setResults([])} className="text-xs opacity-40 hover:opacity-100">초기화</button>
-                  </div>
-                  {results.map((r) => {
+              {/* 검색 결과 — 파일별 그룹 */}
+              {results.length > 0 && (() => {
+                // Group by file_path
+                const grouped = new Map<string, { projectId: string; projectName: string; filePath: string; items: typeof results }>();
+                for (const r of results) {
+                  if (!grouped.has(r.file_path)) {
                     const project = projects.find((p) => p.name === r.project_name);
-                    const isActive = viewingDoc?.filePath === r.file_path;
-                    return (
-                      <div key={r.chunk_id}
-                        className="px-2 py-1.5 rounded cursor-pointer text-xs mb-0.5 hover:opacity-80"
-                        style={{
-                          background: isActive ? "var(--accent)" : "transparent",
-                          color: isActive ? "#1a1b26" : "var(--text-secondary)",
-                        }}
-                        onClick={() => { if (project) viewDocument(project.id, r.file_path); }}>
-                        <div className="font-medium truncate">{r.file_path.split("/").pop()}</div>
-                        {r.heading_path && <div className="opacity-50 truncate">{r.heading_path}</div>}
-                      </div>
-                    );
-                  })}
-                  <div className="border-b my-2" style={{ borderColor: "var(--border)" }} />
-                </div>
-              )}
+                    grouped.set(r.file_path, { projectId: project?.id || "", projectName: r.project_name, filePath: r.file_path, items: [] });
+                  }
+                  grouped.get(r.file_path)!.items.push(r);
+                }
+                return (
+                  <div className="mb-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium opacity-60">
+                        {grouped.size}개 파일에서 {results.length}건
+                      </span>
+                      <button onClick={() => setResults([])} className="text-xs opacity-40 hover:opacity-100">초기화</button>
+                    </div>
+                    {Array.from(grouped.values()).map((group) => {
+                      const isActive = viewingDoc?.filePath === group.filePath;
+                      return (
+                        <div key={group.filePath} className="mb-1">
+                          {/* 파일 헤더 */}
+                          <div
+                            className="px-2 py-1.5 rounded cursor-pointer hover:opacity-80"
+                            style={{
+                              background: isActive ? "var(--accent)" : "var(--bg-secondary)",
+                              color: isActive ? "#1a1b26" : undefined,
+                            }}
+                            onClick={() => viewDocument(group.projectId, group.filePath)}>
+                            <div className="flex items-center gap-1 text-xs">
+                              <span className="font-medium truncate">{group.filePath.split("/").pop()}</span>
+                              <span className="opacity-40 ml-auto flex-shrink-0">{group.items.length}건</span>
+                            </div>
+                            <div className="text-xs opacity-40 truncate">{group.projectName} / {group.filePath}</div>
+                          </div>
+                          {/* 매칭된 섹션들 */}
+                          {group.items.map((r) => (
+                            <div key={r.chunk_id}
+                              className="px-3 py-1 text-xs cursor-pointer hover:opacity-80"
+                              style={{ color: "var(--text-secondary)" }}
+                              onClick={() => viewDocument(group.projectId, group.filePath)}>
+                              {r.heading_path && (
+                                <span className="opacity-60">{r.heading_path}</span>
+                              )}
+                              <span className="opacity-30 ml-1">({(r.score * 100).toFixed(0)}%)</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                    <div className="border-b my-2" style={{ borderColor: "var(--border)" }} />
+                  </div>
+                );
+              })()}
 
               {/* 프로젝트 폴더 트리 */}
               <div className="text-xs font-medium opacity-60 mb-2">프로젝트</div>
