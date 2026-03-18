@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface Project {
   id: string;
@@ -45,6 +47,7 @@ function App() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [indexing, setIndexing] = useState<Set<string>>(new Set());
+  const [viewingDoc, setViewingDoc] = useState<{ projectId: string; filePath: string; content: string } | null>(null);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -133,6 +136,15 @@ function App() {
       await invoke("open_file", { projectId: project.id, filePath });
     } catch (e) {
       console.error("Failed to open file:", e);
+    }
+  };
+
+  const viewDocument = async (projectId: string, filePath: string) => {
+    try {
+      const content = await invoke<string>("get_document", { projectId, filePath });
+      setViewingDoc({ projectId, filePath, content });
+    } catch (e) {
+      console.error("Failed to load document:", e);
     }
   };
 
@@ -240,7 +252,7 @@ function App() {
         {/* Search */}
         {tab === "search" && (
           <div>
-            <div className="flex gap-2 mb-6">
+            <div className="flex gap-2 mb-4">
               <select
                 value={selectedProject}
                 onChange={(e) => setSelectedProject(e.target.value)}
@@ -271,39 +283,83 @@ function App() {
               </button>
             </div>
 
-            <div className="space-y-3">
-              {results.map((r) => {
-                const project = projects.find((p) => p.name === r.project_name);
-                return (
-                  <div
-                    key={r.chunk_id}
-                    className="p-4 rounded-lg cursor-pointer hover:opacity-90"
-                    style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}
-                    onClick={() => project && openFile(project, r.file_path)}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs px-2 py-0.5 rounded" style={{ background: "var(--accent)", color: "#1a1b26" }}>
-                        {r.project_name}
-                      </span>
-                      <span className="text-sm opacity-70">{r.file_path}</span>
-                      <span className="text-xs opacity-40 ml-auto">score: {r.score.toFixed(3)}</span>
+            <div className="flex gap-4" style={{ height: "calc(100vh - 160px)" }}>
+              {/* Results list */}
+              <div className={`space-y-2 overflow-y-auto ${viewingDoc ? "w-1/3" : "w-full"}`}>
+                {results.map((r) => {
+                  const project = projects.find((p) => p.name === r.project_name);
+                  const isActive = viewingDoc?.filePath === r.file_path;
+                  return (
+                    <div
+                      key={r.chunk_id}
+                      className="p-3 rounded-lg cursor-pointer hover:opacity-90"
+                      style={{
+                        background: isActive ? "var(--accent)" : "var(--bg-secondary)",
+                        color: isActive ? "#1a1b26" : undefined,
+                        border: `1px solid ${isActive ? "var(--accent)" : "var(--border)"}`,
+                      }}
+                      onClick={() => {
+                        if (project) viewDocument(project.id, r.file_path);
+                      }}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        {!isActive && (
+                          <span className="text-xs px-2 py-0.5 rounded" style={{ background: "var(--accent)", color: "#1a1b26" }}>
+                            {r.project_name}
+                          </span>
+                        )}
+                        <span className="text-sm opacity-70">{r.file_path}</span>
+                      </div>
+                      {r.heading_path && (
+                        <div className="text-xs opacity-50 mb-1">{r.heading_path}</div>
+                      )}
+                      {!viewingDoc && (
+                        <p
+                          className="text-sm"
+                          style={{ color: isActive ? "#1a1b26" : "var(--text-secondary)" }}
+                          dangerouslySetInnerHTML={{ __html: r.snippet }}
+                        />
+                      )}
                     </div>
-                    {r.heading_path && (
-                      <div className="text-xs opacity-50 mb-1">{r.heading_path}</div>
-                    )}
-                    <p
-                      className="text-sm"
-                      style={{ color: "var(--text-secondary)" }}
-                      dangerouslySetInnerHTML={{ __html: r.snippet }}
-                    />
+                  );
+                })}
+                {results.length === 0 && query && !searching && (
+                  <p className="text-center opacity-50 py-8">No results found</p>
+                )}
+                {!query && !viewingDoc && (
+                  <p className="text-center opacity-40 py-12">Enter a search query to find documents across your vaults</p>
+                )}
+              </div>
+
+              {/* Document viewer */}
+              {viewingDoc && (
+                <div className="w-2/3 overflow-y-auto rounded-lg p-6" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-sm opacity-60">{viewingDoc.filePath}</span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          const project = projects.find((p) => p.id === viewingDoc.projectId);
+                          if (project) openFile(project, viewingDoc.filePath);
+                        }}
+                        className="px-3 py-1 rounded text-xs"
+                        style={{ background: "var(--accent)", color: "#1a1b26" }}
+                      >
+                        Open in Obsidian
+                      </button>
+                      <button
+                        onClick={() => setViewingDoc(null)}
+                        className="px-3 py-1 rounded text-xs opacity-60 hover:opacity-100"
+                        style={{ border: "1px solid var(--border)" }}
+                      >
+                        Close
+                      </button>
+                    </div>
                   </div>
-                );
-              })}
-              {results.length === 0 && query && !searching && (
-                <p className="text-center opacity-50 py-8">No results found</p>
-              )}
-              {!query && (
-                <p className="text-center opacity-40 py-12">Enter a search query to find documents across your vaults</p>
+                  <div className="prose prose-invert max-w-none text-sm" style={{ color: "var(--text-primary)" }}>
+                    <Markdown remarkPlugins={[remarkGfm]}>{viewingDoc.content}</Markdown>
+                  </div>
+                </div>
               )}
             </div>
           </div>

@@ -20,3 +20,22 @@ body {
 * {
   box-sizing: border-box;
 }
+
+/* Markdown renderer styles */
+.prose h1 { font-size: 1.5rem; font-weight: 700; margin: 1rem 0 0.5rem; color: var(--text-primary); }
+.prose h2 { font-size: 1.25rem; font-weight: 600; margin: 1rem 0 0.5rem; color: var(--text-primary); border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
+.prose h3 { font-size: 1.1rem; font-weight: 600; margin: 0.75rem 0 0.5rem; color: var(--text-primary); }
+.prose p { margin: 0.5rem 0; line-height: 1.6; }
+.prose ul, .prose ol { margin: 0.5rem 0; padding-left: 1.5rem; }
+.prose li { margin: 0.25rem 0; }
+.prose code { background: var(--bg-primary); padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.85em; }
+.prose pre { background: var(--bg-primary); padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 0.75rem 0; }
+.prose pre code { background: none; padding: 0; }
+.prose table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; }
+.prose th, .prose td { border: 1px solid var(--border); padding: 0.5rem; text-align: left; font-size: 0.85rem; }
+.prose th { background: var(--bg-primary); }
+.prose a { color: var(--accent); text-decoration: none; }
+.prose a:hover { text-decoration: underline; }
+.prose blockquote { border-left: 3px solid var(--accent); padding-left: 1rem; opacity: 0.8; margin: 0.75rem 0; }
+.prose hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
+.prose img { max-width: 100%; border-radius: 8px; }
