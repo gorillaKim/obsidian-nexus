@@ -72,7 +72,85 @@ fn project_info(
     }))
 }
 
+/// Register MCP server in Claude Code config on first launch
+fn register_mcp_server() {
+    let mcp_binary = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("nexus-mcp-server")))
+        .unwrap_or_default();
+
+    if !mcp_binary.exists() {
+        // In dev mode, try the release build path
+        let alt = dirs::home_dir()
+            .map(|h| h.join("gorillaProject/obsidian-nexus/target/release/nexus-mcp-server"));
+        if let Some(ref alt_path) = alt {
+            if !alt_path.exists() {
+                return;
+            }
+        }
+    }
+
+    // Claude Code config: ~/.claude.json (Claude Desktop) or ~/.claude/claude_desktop_config.json
+    let config_paths = [
+        dirs::home_dir().map(|h| h.join(".claude/claude_desktop_config.json")),
+        dirs::home_dir().map(|h| h.join(".claude.json")),
+    ];
+
+    for config_path in config_paths.iter().flatten() {
+        let mcp_path = if mcp_binary.exists() {
+            mcp_binary.to_string_lossy().to_string()
+        } else {
+            dirs::home_dir()
+                .map(|h| h.join("gorillaProject/obsidian-nexus/target/release/nexus-mcp-server"))
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string()
+        };
+
+        let mut config: serde_json::Value = if config_path.exists() {
+            let content = std::fs::read_to_string(config_path).unwrap_or_default();
+            serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+
+        // Check if already registered
+        if config.get("mcpServers")
+            .and_then(|s| s.get("nexus"))
+            .is_some()
+        {
+            return; // Already registered
+        }
+
+        // Add nexus MCP server
+        let servers = config.as_object_mut().unwrap()
+            .entry("mcpServers")
+            .or_insert(serde_json::json!({}));
+        servers.as_object_mut().unwrap().insert(
+            "nexus".to_string(),
+            serde_json::json!({
+                "command": mcp_path,
+                "args": []
+            }),
+        );
+
+        // Write config
+        if let Some(parent) = config_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(content) = serde_json::to_string_pretty(&config) {
+            if std::fs::write(config_path, content).is_ok() {
+                eprintln!("Nexus MCP server registered in {}", config_path.display());
+                return;
+            }
+        }
+    }
+}
+
 fn main() {
+    // Auto-register MCP server on first launch
+    register_mcp_server();
+
     let pool = sqlite::create_pool().expect("Failed to create database pool");
     sqlite::run_migrations(&pool).expect("Failed to run migrations");
 
