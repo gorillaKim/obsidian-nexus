@@ -225,6 +225,15 @@ fn remove_project(state: State<AppState>, project_id: String) -> Result<(), Stri
     nexus_core::project::remove_project(&state.pool, &project_id).map_err(|e| e.to_string())
 }
 
+/// List documents in a project
+#[tauri::command]
+fn list_documents(
+    state: State<AppState>,
+    project_id: String,
+) -> Result<Vec<nexus_core::search::DocumentInfo>, String> {
+    nexus_core::search::list_documents(&state.pool, &project_id, None).map_err(|e| e.to_string())
+}
+
 /// Check and install Obsidian if not present (macOS only)
 fn ensure_obsidian() {
     let installed = std::path::Path::new("/Applications/Obsidian.app").exists()
@@ -266,6 +275,7 @@ fn main() {
             open_file,
             add_project,
             remove_project,
+            list_documents,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
