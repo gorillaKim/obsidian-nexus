@@ -184,6 +184,47 @@ fn open_file(
     }
 }
 
+/// Add a new project: register vault path, index, and open in Obsidian
+#[tauri::command]
+fn add_project(
+    state: State<AppState>,
+    name: String,
+    path: String,
+) -> Result<serde_json::Value, String> {
+    // Derive vault_name from folder name
+    let vault_name = std::path::Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| name.clone());
+
+    let proj = nexus_core::project::add_project(&state.pool, &name, &path, Some(&vault_name))
+        .map_err(|e| e.to_string())?;
+
+    // Auto-index
+    let report = nexus_core::index_engine::index_project(&state.pool, &proj.id, false)
+        .map_err(|e| e.to_string())?;
+
+    // Auto-register in Obsidian
+    let abs_path = std::path::Path::new(&path).canonicalize().unwrap_or(std::path::PathBuf::from(&path));
+    let _ = std::process::Command::new("open")
+        .args(["-a", "Obsidian", abs_path.to_str().unwrap_or(&path)])
+        .spawn();
+
+    Ok(serde_json::json!({
+        "project": proj,
+        "index_report": {
+            "indexed": report.indexed,
+            "errors": report.errors,
+        }
+    }))
+}
+
+/// Remove a project
+#[tauri::command]
+fn remove_project(state: State<AppState>, project_id: String) -> Result<(), String> {
+    nexus_core::project::remove_project(&state.pool, &project_id).map_err(|e| e.to_string())
+}
+
 /// Check and install Obsidian if not present (macOS only)
 fn ensure_obsidian() {
     let installed = std::path::Path::new("/Applications/Obsidian.app").exists()
@@ -213,6 +254,7 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState { pool })
         .invoke_handler(tauri::generate_handler![
@@ -222,6 +264,8 @@ fn main() {
             get_document,
             project_info,
             open_file,
+            add_project,
+            remove_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

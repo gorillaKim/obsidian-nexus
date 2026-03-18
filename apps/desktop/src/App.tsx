@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 
 interface Project {
   id: string;
@@ -99,6 +100,28 @@ function App() {
       next.delete(projectId);
       return next;
     });
+  };
+
+  const handleAddVault = async () => {
+    try {
+      const selected = await open({ directory: true, title: "Select Obsidian Vault Folder" });
+      if (!selected) return;
+      const folderPath = selected as string;
+      const folderName = folderPath.split("/").pop() || "untitled";
+      await invoke("add_project", { name: folderName, path: folderPath });
+      await loadProjects();
+    } catch (e) {
+      console.error("Failed to add vault:", e);
+    }
+  };
+
+  const handleRemoveProject = async (projectId: string) => {
+    try {
+      await invoke("remove_project", { projectId });
+      await loadProjects();
+    } catch (e) {
+      console.error("Failed to remove project:", e);
+    }
   };
 
   const openFile = async (project: Project, filePath: string) => {
@@ -285,6 +308,13 @@ function App() {
         {/* Projects */}
         {tab === "projects" && (
           <div className="space-y-3">
+            <button
+              onClick={handleAddVault}
+              className="w-full px-4 py-3 rounded-lg text-sm font-medium border-2 border-dashed hover:opacity-80"
+              style={{ borderColor: "var(--accent)", color: "var(--accent)" }}
+            >
+              + Add Vault Folder
+            </button>
             {projects.map((p) => {
               const info = projectInfos.get(p.id);
               return (
@@ -295,14 +325,23 @@ function App() {
                 >
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="font-medium">{p.name}</h3>
-                    <button
-                      onClick={() => handleIndex(p.id)}
-                      disabled={indexing.has(p.id)}
-                      className="px-3 py-1 rounded text-sm"
-                      style={{ background: "var(--accent)", color: "#1a1b26", opacity: indexing.has(p.id) ? 0.5 : 1 }}
-                    >
-                      {indexing.has(p.id) ? "Indexing..." : "Index Now"}
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleIndex(p.id)}
+                        disabled={indexing.has(p.id)}
+                        className="px-3 py-1 rounded text-sm"
+                        style={{ background: "var(--accent)", color: "#1a1b26", opacity: indexing.has(p.id) ? 0.5 : 1 }}
+                      >
+                        {indexing.has(p.id) ? "Indexing..." : "Index Now"}
+                      </button>
+                      <button
+                        onClick={() => handleRemoveProject(p.id)}
+                        className="px-3 py-1 rounded text-sm opacity-50 hover:opacity-100"
+                        style={{ border: "1px solid var(--border)", color: "var(--text-secondary)" }}
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
                   <p className="text-xs opacity-50 mb-1">{p.path}</p>
                   {p.vault_name && (
