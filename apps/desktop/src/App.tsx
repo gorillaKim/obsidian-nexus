@@ -47,13 +47,15 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectInfos, setProjectInfos] = useState<Map<string, ProjectInfo>>(new Map());
   const [query, setQuery] = useState("");
-  const [selectedProject, setSelectedProject] = useState<string>("");
+  const [selectedProject] = useState<string>("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [indexing, setIndexing] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [viewingDoc, setViewingDoc] = useState<{ projectId: string; filePath: string; content: string } | null>(null);
-  const [browseDocs, setBrowseDocs] = useState<{ projectId: string; projectName: string; docs: DocItem[] } | null>(null);
+  // browseDocs removed — tree sidebar replaces it
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [projectDocs, setProjectDocs] = useState<Map<string, DocItem[]>>(new Map());
 
   const loadProjects = useCallback(async () => {
     try {
@@ -78,7 +80,6 @@ function App() {
     if (!query.trim()) return;
     setSearching(true);
     setViewingDoc(null);
-    setBrowseDocs(null);
     try {
       const res = await invoke<SearchResult[]>("search_documents", {
         query, projectId: selectedProject || null, limit: 20,
@@ -129,13 +130,38 @@ function App() {
     } catch (e) { console.error(e); }
   };
 
-  const loadProjectDocs = async (projectId: string, projectName: string) => {
-    try {
-      const docs = await invoke<DocItem[]>("list_documents", { projectId });
-      setBrowseDocs({ projectId, projectName, docs });
-      setResults([]);
-      setViewingDoc(null);
-    } catch (e) { console.error(e); }
+
+  const toggleProject = async (projectId: string) => {
+    const next = new Set(expandedProjects);
+    if (next.has(projectId)) {
+      next.delete(projectId);
+    } else {
+      next.add(projectId);
+      if (!projectDocs.has(projectId)) {
+        try {
+          const docs = await invoke<DocItem[]>("list_documents", { projectId });
+          setProjectDocs((prev) => new Map(prev).set(projectId, docs));
+        } catch (e) { console.error(e); }
+      }
+    }
+    setExpandedProjects(next);
+  };
+
+  // Group docs by folder for tree view
+  const buildTree = (docs: DocItem[]) => {
+    const folders: Map<string, DocItem[]> = new Map();
+    const rootDocs: DocItem[] = [];
+    for (const doc of docs) {
+      const parts = doc.file_path.split("/");
+      if (parts.length > 1) {
+        const folder = parts.slice(0, -1).join("/");
+        if (!folders.has(folder)) folders.set(folder, []);
+        folders.get(folder)!.push(doc);
+      } else {
+        rootDocs.push(doc);
+      }
+    }
+    return { folders, rootDocs };
   };
 
   const totalDocs = Array.from(projectInfos.values()).reduce((sum, i) => sum + i.stats.doc_count, 0);
@@ -156,7 +182,7 @@ function App() {
           {(["dashboard", "search", "projects", "guide"] as Tab[]).map((t) => (
             <button
               key={t}
-              onClick={() => { setTab(t); setViewingDoc(null); setBrowseDocs(null); }}
+              onClick={() => { setTab(t); setViewingDoc(null); }}
               className={`px-3 py-1 rounded text-sm ${tab === t ? "font-bold" : "opacity-60"}`}
               style={{ color: tab === t ? "var(--accent)" : "var(--text-secondary)" }}
             >
@@ -227,137 +253,125 @@ function App() {
 
         {/* ===== 검색 ===== */}
         {tab === "search" && (
-          <div>
-            {/* 검색바 */}
-            <div className="flex gap-2 mb-4">
-              <select value={selectedProject}
-                onChange={(e) => { setSelectedProject(e.target.value); setBrowseDocs(null); setViewingDoc(null); }}
-                className="px-3 py-2 rounded text-sm"
-                style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: `1px solid var(--border)` }}>
-                <option value="">전체 프로젝트</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-              <input type="text" value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="지식 베이스 검색..."
-                className="flex-1 px-4 py-2 rounded text-sm"
-                style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: `1px solid var(--border)` }} />
-              <button onClick={handleSearch} disabled={searching}
-                className="px-4 py-2 rounded text-sm font-medium"
-                style={{ background: "var(--accent)", color: "#1a1b26" }}>
-                {searching ? "..." : "검색"}
-              </button>
-            </div>
+          <div className="flex" style={{ height: "calc(100vh - 73px)" }}>
+            {/* 왼쪽 사이드바: 트리 + 검색 */}
+            <div className="w-64 flex-shrink-0 border-r overflow-y-auto p-3" style={{ borderColor: "var(--border)" }}>
+              {/* 검색 입력 */}
+              <div className="flex gap-1 mb-3">
+                <input type="text" value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  placeholder="검색..."
+                  className="flex-1 px-3 py-1.5 rounded text-xs"
+                  style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: `1px solid var(--border)` }} />
+                <button onClick={handleSearch} disabled={searching}
+                  className="px-2 py-1.5 rounded text-xs"
+                  style={{ background: "var(--accent)", color: "#1a1b26" }}>
+                  {searching ? "..." : "검색"}
+                </button>
+              </div>
 
-            {/* 프로젝트별 문서 탐색 버튼 */}
-            {!browseDocs && results.length === 0 && !viewingDoc && (
-              <div className="mb-4">
-                <h3 className="text-sm opacity-60 mb-2">프로젝트별 문서 탐색</h3>
-                <div className="flex gap-2 flex-wrap">
-                  {projects.map((p) => {
-                    const info = projectInfos.get(p.id);
+              {/* 검색 결과 */}
+              {results.length > 0 && (
+                <div className="mb-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium opacity-60">검색 결과 ({results.length})</span>
+                    <button onClick={() => setResults([])} className="text-xs opacity-40 hover:opacity-100">초기화</button>
+                  </div>
+                  {results.map((r) => {
+                    const project = projects.find((p) => p.name === r.project_name);
+                    const isActive = viewingDoc?.filePath === r.file_path;
                     return (
-                      <button key={p.id}
-                        onClick={() => loadProjectDocs(p.id, p.name)}
-                        className="px-3 py-2 rounded-lg text-sm hover:opacity-80"
-                        style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
-                        {p.name}
-                        {info && <span className="text-xs opacity-50 ml-2">{info.stats.doc_count}개</span>}
-                      </button>
+                      <div key={r.chunk_id}
+                        className="px-2 py-1.5 rounded cursor-pointer text-xs mb-0.5 hover:opacity-80"
+                        style={{
+                          background: isActive ? "var(--accent)" : "transparent",
+                          color: isActive ? "#1a1b26" : "var(--text-secondary)",
+                        }}
+                        onClick={() => { if (project) viewDocument(project.id, r.file_path); }}>
+                        <div className="font-medium truncate">{r.file_path.split("/").pop()}</div>
+                        {r.heading_path && <div className="opacity-50 truncate">{r.heading_path}</div>}
+                      </div>
                     );
                   })}
+                  <div className="border-b my-2" style={{ borderColor: "var(--border)" }} />
                 </div>
-                {projects.length === 0 && (
-                  <p className="text-center opacity-40 py-8">프로젝트 탭에서 볼트를 먼저 추가하세요</p>
-                )}
-              </div>
-            )}
+              )}
 
-            {/* 메인 영역: 목록 + 뷰어 */}
-            <div className="flex gap-4" style={{ height: "calc(100vh - 200px)" }}>
-
-              {/* 왼쪽: 검색 결과 또는 문서 목록 */}
-              <div className={`space-y-2 overflow-y-auto ${viewingDoc ? "w-1/3" : "w-full"}`}>
-
-                {/* 문서 탐색 모드 */}
-                {browseDocs && !results.length && (
-                  <>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium">{browseDocs.projectName} — {browseDocs.docs.length}개 문서</span>
-                      <button onClick={() => { setBrowseDocs(null); setViewingDoc(null); }}
-                        className="text-xs opacity-50 hover:opacity-100">닫기</button>
+              {/* 프로젝트 폴더 트리 */}
+              <div className="text-xs font-medium opacity-60 mb-2">프로젝트</div>
+              {projects.length === 0 && (
+                <p className="text-xs opacity-40 px-2">프로젝트 탭에서 볼트를 추가하세요</p>
+              )}
+              {projects.map((p) => {
+                const isExpanded = expandedProjects.has(p.id);
+                const docs = projectDocs.get(p.id) || [];
+                const tree = isExpanded ? buildTree(docs) : null;
+                return (
+                  <div key={p.id} className="mb-1">
+                    {/* 프로젝트 헤더 */}
+                    <div
+                      className="flex items-center gap-1 px-2 py-1 rounded cursor-pointer hover:opacity-80"
+                      style={{ background: isExpanded ? "var(--bg-secondary)" : "transparent" }}
+                      onClick={() => toggleProject(p.id)}>
+                      <span className="text-xs opacity-50">{isExpanded ? "▼" : "▶"}</span>
+                      <span className="text-xs font-medium">{p.name}</span>
+                      {projectInfos.get(p.id) && (
+                        <span className="text-xs opacity-30 ml-auto">{projectInfos.get(p.id)!.stats.doc_count}</span>
+                      )}
                     </div>
-                    {browseDocs.docs.map((doc) => {
-                      const isActive = viewingDoc?.filePath === doc.file_path;
-                      return (
-                        <div key={doc.id}
-                          className="p-3 rounded-lg cursor-pointer hover:opacity-90 flex items-center gap-3"
-                          style={{
-                            background: isActive ? "var(--accent)" : "var(--bg-secondary)",
-                            color: isActive ? "#1a1b26" : undefined,
-                            border: `1px solid ${isActive ? "var(--accent)" : "var(--border)"}`,
-                          }}
-                          onClick={() => viewDocument(browseDocs.projectId, doc.file_path)}>
-                          <div>
-                            <div className="text-sm font-medium">{doc.title || doc.file_path}</div>
-                            {doc.title && <div className="text-xs opacity-40">{doc.file_path}</div>}
+                    {/* 펼쳐진 문서 목록 */}
+                    {isExpanded && tree && (
+                      <div className="ml-3">
+                        {/* 폴더들 */}
+                        {Array.from(tree.folders.entries()).map(([folder, folderDocs]) => (
+                          <div key={folder} className="mb-0.5">
+                            <div className="flex items-center gap-1 px-2 py-0.5 text-xs opacity-50">
+                              <span>📁</span>
+                              <span>{folder}</span>
+                            </div>
+                            {folderDocs.map((doc) => {
+                              const isActive = viewingDoc?.filePath === doc.file_path;
+                              return (
+                                <div key={doc.id}
+                                  className="flex items-center gap-1 px-4 py-1 rounded cursor-pointer hover:opacity-80 text-xs"
+                                  style={{
+                                    background: isActive ? "var(--accent)" : "transparent",
+                                    color: isActive ? "#1a1b26" : "var(--text-secondary)",
+                                  }}
+                                  onClick={() => viewDocument(p.id, doc.file_path)}>
+                                  <span className="truncate">{doc.title || doc.file_path.split("/").pop()}</span>
+                                </div>
+                              );
+                            })}
                           </div>
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
-
-                {/* 검색 결과 모드 */}
-                {results.length > 0 && (
-                  <>
-                    {browseDocs && (
-                      <button onClick={() => { setResults([]); }}
-                        className="text-xs opacity-50 hover:opacity-100 mb-2">문서 목록으로 돌아가기</button>
+                        ))}
+                        {/* 루트 파일들 */}
+                        {tree.rootDocs.map((doc) => {
+                          const isActive = viewingDoc?.filePath === doc.file_path;
+                          return (
+                            <div key={doc.id}
+                              className="flex items-center gap-1 px-2 py-1 rounded cursor-pointer hover:opacity-80 text-xs"
+                              style={{
+                                background: isActive ? "var(--accent)" : "transparent",
+                                color: isActive ? "#1a1b26" : "var(--text-secondary)",
+                              }}
+                              onClick={() => viewDocument(p.id, doc.file_path)}>
+                              <span className="truncate">{doc.title || doc.file_path}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
-                    {results.map((r) => {
-                      const project = projects.find((p) => p.name === r.project_name);
-                      const isActive = viewingDoc?.filePath === r.file_path;
-                      return (
-                        <div key={r.chunk_id}
-                          className="p-3 rounded-lg cursor-pointer hover:opacity-90"
-                          style={{
-                            background: isActive ? "var(--accent)" : "var(--bg-secondary)",
-                            color: isActive ? "#1a1b26" : undefined,
-                            border: `1px solid ${isActive ? "var(--accent)" : "var(--border)"}`,
-                          }}
-                          onClick={() => { if (project) viewDocument(project.id, r.file_path); }}>
-                          <div className="flex items-center gap-2 mb-1">
-                            {!isActive && (
-                              <span className="text-xs px-2 py-0.5 rounded" style={{ background: "var(--accent)", color: "#1a1b26" }}>
-                                {r.project_name}
-                              </span>
-                            )}
-                            <span className="text-sm opacity-70">{r.file_path}</span>
-                          </div>
-                          {r.heading_path && <div className="text-xs opacity-50 mb-1">{r.heading_path}</div>}
-                          {!viewingDoc && (
-                            <p className="text-sm" style={{ color: isActive ? "#1a1b26" : "var(--text-secondary)" }}
-                              dangerouslySetInnerHTML={{ __html: r.snippet }} />
-                          )}
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
+                  </div>
+                );
+              })}
+            </div>
 
-                {results.length === 0 && query && !searching && !browseDocs && (
-                  <p className="text-center opacity-50 py-8">검색 결과가 없습니다</p>
-                )}
-              </div>
-
-              {/* 오른쪽: 문서 뷰어 */}
-              {viewingDoc && (
-                <div className="w-2/3 overflow-y-auto rounded-lg p-6"
-                  style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+            {/* 오른쪽: 문서 뷰어 */}
+            <div className="flex-1 overflow-y-auto">
+              {viewingDoc ? (
+                <div className="p-6">
                   <div className="flex items-center justify-between mb-4">
                     <span className="text-sm opacity-60">{viewingDoc.filePath}</span>
                     <div className="flex gap-2">
@@ -378,6 +392,13 @@ function App() {
                   </div>
                   <div className="prose prose-invert max-w-none text-sm" style={{ color: "var(--text-primary)" }}>
                     <Markdown remarkPlugins={[remarkGfm]}>{viewingDoc.content}</Markdown>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-full opacity-40">
+                  <div className="text-center">
+                    <p className="text-lg mb-2">문서를 선택하세요</p>
+                    <p className="text-sm">왼쪽에서 프로젝트를 펼치거나 검색하여 문서를 확인할 수 있습니다</p>
                   </div>
                 </div>
               )}
