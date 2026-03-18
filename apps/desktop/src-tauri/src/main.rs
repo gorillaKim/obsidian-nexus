@@ -151,14 +151,11 @@ fn open_file(
 ) -> Result<serde_json::Value, String> {
     let proj = nexus_core::project::get_project(&state.pool, &project_id)
         .map_err(|e| e.to_string())?;
-    let vault_name = proj.vault_name.as_deref().unwrap_or(&proj.name);
     let abs_path = std::path::Path::new(&proj.path).join(&file_path);
 
-    // Use path-based URI (works without vault being pre-registered by name)
-    let obsidian_uri = format!(
-        "obsidian://open?path={}",
-        urlencoding::encode(abs_path.to_str().unwrap_or("")),
-    );
+    if !abs_path.exists() {
+        return Err(format!("File not found: {}", abs_path.display()));
+    }
 
     // Check if Obsidian is installed (macOS)
     let obsidian_installed = std::path::Path::new("/Applications/Obsidian.app").exists()
@@ -166,16 +163,24 @@ fn open_file(
             .map(|h| h.join("Applications/Obsidian.app").exists())
             .unwrap_or(false);
 
-    if obsidian_installed && abs_path.exists() {
-        // Open via Obsidian path-based deeplink
-        let _ = std::process::Command::new("open").arg(&obsidian_uri).spawn();
-        Ok(serde_json::json!({ "opened_with": "obsidian", "path": abs_path.to_string_lossy() }))
-    } else if abs_path.exists() {
+    if obsidian_installed {
+        // Use `open -a Obsidian <file_path>` — this opens the file directly
+        // Obsidian will auto-detect the vault from the file's parent directory
+        let status = std::process::Command::new("open")
+            .args(["-a", "Obsidian", abs_path.to_str().unwrap_or("")])
+            .spawn();
+        match status {
+            Ok(_) => Ok(serde_json::json!({ "opened_with": "obsidian", "path": abs_path.to_string_lossy() })),
+            Err(_) => {
+                // Fallback to system default
+                let _ = std::process::Command::new("open").arg(&abs_path).spawn();
+                Ok(serde_json::json!({ "opened_with": "system", "path": abs_path.to_string_lossy() }))
+            }
+        }
+    } else {
         // Fallback: open with system default editor
         let _ = std::process::Command::new("open").arg(&abs_path).spawn();
         Ok(serde_json::json!({ "opened_with": "system", "path": abs_path.to_string_lossy() }))
-    } else {
-        Err(format!("File not found: {}", abs_path.display()))
     }
 }
 
