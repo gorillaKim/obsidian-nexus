@@ -102,10 +102,13 @@ function App() {
     });
   };
 
+  const [adding, setAdding] = useState(false);
+
   const handleAddVault = async () => {
     try {
       const selected = await open({ directory: true, title: "Select Obsidian Vault Folder" });
       if (!selected) return;
+      setAdding(true);
       const folderPath = selected as string;
       const folderName = folderPath.split("/").pop() || "untitled";
       await invoke("add_project", { name: folderName, path: folderPath });
@@ -113,6 +116,7 @@ function App() {
     } catch (e) {
       console.error("Failed to add vault:", e);
     }
+    setAdding(false);
   };
 
   const handleRemoveProject = async (projectId: string) => {
@@ -310,10 +314,11 @@ function App() {
           <div className="space-y-3">
             <button
               onClick={handleAddVault}
+              disabled={adding}
               className="w-full px-4 py-3 rounded-lg text-sm font-medium border-2 border-dashed hover:opacity-80"
-              style={{ borderColor: "var(--accent)", color: "var(--accent)" }}
+              style={{ borderColor: "var(--accent)", color: "var(--accent)", opacity: adding ? 0.5 : 1 }}
             >
-              + Add Vault Folder
+              {adding ? "Adding vault & indexing..." : "+ Add Vault Folder"}
             </button>
             {projects.map((p) => {
               const info = projectInfos.get(p.id);
