@@ -53,6 +53,8 @@ pub struct SearchConfig {
     pub default_limit: usize,
     #[serde(default = "default_hybrid_weight")]
     pub hybrid_weight: f64,
+    #[serde(default = "default_min_vector_score")]
+    pub min_vector_score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +83,7 @@ fn default_exclude_patterns() -> Vec<String> {
 }
 fn default_limit() -> usize { 20 }
 fn default_hybrid_weight() -> f64 { 0.7 }
+fn default_min_vector_score() -> f64 { 0.42 }
 fn default_debounce_ms() -> u64 { 500 }
 fn default_log_level() -> String { "info".into() }
 
@@ -123,6 +126,7 @@ impl Default for SearchConfig {
         Self {
             default_limit: default_limit(),
             hybrid_weight: default_hybrid_weight(),
+            min_vector_score: default_min_vector_score(),
         }
     }
 }

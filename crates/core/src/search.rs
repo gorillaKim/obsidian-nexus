@@ -238,6 +238,10 @@ pub fn vector_search(
         })
     }).collect();
 
+    // Filter by minimum similarity threshold
+    let min_score = config.search.min_vector_score as f32;
+    scored.retain(|(s, _)| *s >= min_score);
+
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     scored.truncate(limit);
 
