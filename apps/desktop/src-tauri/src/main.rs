@@ -72,78 +72,111 @@ fn project_info(
     }))
 }
 
-/// Register MCP server in Claude Code config on first launch
-fn register_mcp_server() {
-    let mcp_binary = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("nexus-mcp-server")))
-        .unwrap_or_default();
-
-    if !mcp_binary.exists() {
-        // In dev mode, try the release build path
-        let alt = dirs::home_dir()
-            .map(|h| h.join("gorillaProject/obsidian-nexus/target/release/nexus-mcp-server"));
-        if let Some(ref alt_path) = alt {
-            if !alt_path.exists() {
-                return;
+/// Find the MCP server binary path
+fn find_mcp_binary() -> Option<String> {
+    // 1. Same directory as current exe
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join("nexus-mcp-server");
+            if candidate.exists() {
+                return Some(candidate.to_string_lossy().to_string());
             }
         }
     }
-
-    // Claude Code config: ~/.claude.json (Claude Desktop) or ~/.claude/claude_desktop_config.json
-    let config_paths = [
-        dirs::home_dir().map(|h| h.join(".claude/claude_desktop_config.json")),
-        dirs::home_dir().map(|h| h.join(".claude.json")),
-    ];
-
-    for config_path in config_paths.iter().flatten() {
-        let mcp_path = if mcp_binary.exists() {
-            mcp_binary.to_string_lossy().to_string()
-        } else {
-            dirs::home_dir()
-                .map(|h| h.join("gorillaProject/obsidian-nexus/target/release/nexus-mcp-server"))
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string()
-        };
-
-        let mut config: serde_json::Value = if config_path.exists() {
-            let content = std::fs::read_to_string(config_path).unwrap_or_default();
-            serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
-        } else {
-            serde_json::json!({})
-        };
-
-        // Check if already registered
-        if config.get("mcpServers")
-            .and_then(|s| s.get("nexus"))
-            .is_some()
-        {
-            return; // Already registered
+    // 2. Release build path (dev mode)
+    if let Some(home) = dirs::home_dir() {
+        let candidate = home.join("gorillaProject/obsidian-nexus/target/release/nexus-mcp-server");
+        if candidate.exists() {
+            return Some(candidate.to_string_lossy().to_string());
         }
+    }
+    None
+}
 
-        // Add nexus MCP server
-        let servers = config.as_object_mut().unwrap()
-            .entry("mcpServers")
-            .or_insert(serde_json::json!({}));
-        servers.as_object_mut().unwrap().insert(
-            "nexus".to_string(),
-            serde_json::json!({
-                "command": mcp_path,
-                "args": []
-            }),
-        );
+/// Register MCP server in a JSON config file under "mcpServers.nexus"
+fn register_in_config(config_path: &std::path::Path, mcp_path: &str) -> bool {
+    let mut config: serde_json::Value = if config_path.exists() {
+        let content = std::fs::read_to_string(config_path).unwrap_or_default();
+        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
 
-        // Write config
-        if let Some(parent) = config_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+    // Already registered?
+    if config.get("mcpServers").and_then(|s| s.get("nexus")).is_some() {
+        return true;
+    }
+
+    let servers = config.as_object_mut().unwrap()
+        .entry("mcpServers")
+        .or_insert(serde_json::json!({}));
+    servers.as_object_mut().unwrap().insert(
+        "nexus".to_string(),
+        serde_json::json!({ "command": mcp_path, "args": [] }),
+    );
+
+    if let Some(parent) = config_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(content) = serde_json::to_string_pretty(&config) {
+        if std::fs::write(config_path, content).is_ok() {
+            eprintln!("Nexus MCP server registered in {}", config_path.display());
+            return true;
         }
-        if let Ok(content) = serde_json::to_string_pretty(&config) {
-            if std::fs::write(config_path, content).is_ok() {
-                eprintln!("Nexus MCP server registered in {}", config_path.display());
-                return;
-            }
-        }
+    }
+    false
+}
+
+/// Register MCP server in both Claude Desktop and Claude Code configs
+fn register_mcp_server() {
+    let mcp_path = match find_mcp_binary() {
+        Some(p) => p,
+        None => return,
+    };
+
+    if let Some(home) = dirs::home_dir() {
+        // Claude Desktop
+        register_in_config(&home.join(".claude/claude_desktop_config.json"), &mcp_path);
+        // Claude Code (settings.json)
+        register_in_config(&home.join(".claude/settings.json"), &mcp_path);
+    }
+}
+
+/// Open a file: try Obsidian deeplink first, fallback to system default editor
+#[tauri::command]
+fn open_file(
+    state: State<AppState>,
+    project_id: String,
+    file_path: String,
+) -> Result<serde_json::Value, String> {
+    let proj = nexus_core::project::get_project(&state.pool, &project_id)
+        .map_err(|e| e.to_string())?;
+    let vault_name = proj.vault_name.as_deref().unwrap_or(&proj.name);
+    let abs_path = std::path::Path::new(&proj.path).join(&file_path);
+
+    // Try Obsidian deeplink
+    let obsidian_uri = format!(
+        "obsidian://open?vault={}&file={}",
+        urlencoding::encode(vault_name),
+        urlencoding::encode(&file_path),
+    );
+
+    // Check if Obsidian is installed (macOS)
+    let obsidian_installed = std::path::Path::new("/Applications/Obsidian.app").exists()
+        || dirs::home_dir()
+            .map(|h| h.join("Applications/Obsidian.app").exists())
+            .unwrap_or(false);
+
+    if obsidian_installed {
+        // Open via Obsidian deeplink
+        let _ = std::process::Command::new("open").arg(&obsidian_uri).spawn();
+        Ok(serde_json::json!({ "opened_with": "obsidian", "uri": obsidian_uri }))
+    } else if abs_path.exists() {
+        // Fallback: open with system default editor
+        let _ = std::process::Command::new("open").arg(&abs_path).spawn();
+        Ok(serde_json::json!({ "opened_with": "system", "path": abs_path.to_string_lossy() }))
+    } else {
+        Err(format!("File not found: {}", abs_path.display()))
     }
 }
 
@@ -164,6 +197,7 @@ fn main() {
             index_project,
             get_document,
             project_info,
+            open_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

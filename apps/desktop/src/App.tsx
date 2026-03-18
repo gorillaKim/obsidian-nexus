@@ -101,10 +101,12 @@ function App() {
     });
   };
 
-  const openInObsidian = (project: Project, filePath: string) => {
-    const vaultName = project.vault_name || project.name;
-    const uri = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(filePath)}`;
-    window.open(uri);
+  const openFile = async (project: Project, filePath: string) => {
+    try {
+      await invoke("open_file", { projectId: project.id, filePath });
+    } catch (e) {
+      console.error("Failed to open file:", e);
+    }
   };
 
   // Totals
@@ -250,7 +252,7 @@ function App() {
                     key={r.chunk_id}
                     className="p-4 rounded-lg cursor-pointer hover:opacity-90"
                     style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}
-                    onClick={() => project && openInObsidian(project, r.file_path)}
+                    onClick={() => project && openFile(project, r.file_path)}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-xs px-2 py-0.5 rounded" style={{ background: "var(--accent)", color: "#1a1b26" }}>
