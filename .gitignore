@@ -1,0 +1,28 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Node
+node_modules/
+dist/
+.output/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Nexus data
+.nexus/
+
+# OMC
+.omc/
+
+# Claude Code
+.claude/

@@ -1,0 +1,9 @@
+{
+  "name": "obsidian-nexus",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @obsidian-nexus/desktop dev",
+    "build": "pnpm --filter @obsidian-nexus/desktop build",
+    "lint": "pnpm --filter @obsidian-nexus/desktop lint"
+  }
+}

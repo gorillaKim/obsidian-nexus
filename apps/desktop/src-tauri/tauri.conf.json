@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/tauri/tauri.conf.json",
+  "productName": "Obsidian Nexus",
+  "version": "0.1.0",
+  "identifier": "com.obsidian-nexus.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Obsidian Nexus",
+        "width": 1024,
+        "height": 768,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    },
+    "updater": {
+      "active": false,
+      "endpoints": [
+        "https://github.com/gorillaKim/obsidian-nexus/releases/latest/download/latest.json"
+      ],
+      "pubkey": "PLACEHOLDER_GENERATE_WITH_cargo_tauri_signer_generate"
+    }
+  }
+}
