@@ -29,11 +29,13 @@ fn search_documents(
         None
     };
 
-    nexus_core::search::fts_search(
+    let config = nexus_core::Config::load().unwrap_or_default();
+    nexus_core::search::hybrid_search(
         &state.pool,
         &query,
         resolved_pid.as_deref(),
         limit.unwrap_or(20),
+        &config,
     )
     .map_err(|e| e.to_string())
 }
