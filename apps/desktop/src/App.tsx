@@ -150,7 +150,7 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "var(--bg-primary)" }}>
       {/* 헤더 */}
-      <header className="px-6 py-4 flex items-center gap-4 border-b" style={{ borderColor: "var(--border)" }}>
+      <header className="px-6 py-4 flex items-center gap-4 border-b sticky top-0 z-50" style={{ borderColor: "var(--border)", background: "var(--bg-primary)" }}>
         <h1 className="text-xl font-bold" style={{ color: "var(--accent)" }}>Obsidian Nexus</h1>
         <nav className="flex gap-2 ml-auto">
           {(["dashboard", "search", "projects", "guide"] as Tab[]).map((t) => (
