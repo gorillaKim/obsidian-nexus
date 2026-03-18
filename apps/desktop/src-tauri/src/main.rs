@@ -180,8 +180,28 @@ fn open_file(
     }
 }
 
+/// Check and install Obsidian if not present (macOS only)
+fn ensure_obsidian() {
+    let installed = std::path::Path::new("/Applications/Obsidian.app").exists()
+        || dirs::home_dir()
+            .map(|h| h.join("Applications/Obsidian.app").exists())
+            .unwrap_or(false);
+
+    if !installed {
+        eprintln!("Obsidian not found, attempting to install via brew...");
+        let status = std::process::Command::new("brew")
+            .args(["install", "--cask", "obsidian"])
+            .status();
+        match status {
+            Ok(s) if s.success() => eprintln!("Obsidian installed successfully"),
+            _ => eprintln!("Could not auto-install Obsidian. Install from https://obsidian.md"),
+        }
+    }
+}
+
 fn main() {
-    // Auto-register MCP server on first launch
+    // Auto-setup on first launch
+    ensure_obsidian();
     register_mcp_server();
 
     let pool = sqlite::create_pool().expect("Failed to create database pool");
