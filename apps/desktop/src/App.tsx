@@ -58,6 +58,7 @@ function App() {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [projectDocs, setProjectDocs] = useState<Map<string, DocItem[]>>(new Map());
   const [searchMode, setSearchMode] = useState<SearchMode>("hybrid");
+  const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState(false);
   const [hybridWeight, setHybridWeight] = useState(0.7);
   const [minVectorScore, setMinVectorScore] = useState(0.65);
@@ -412,7 +413,26 @@ function App() {
                               </div>
                               <div className="text-xs opacity-40 truncate">{group.projectName} / {group.filePath}</div>
                             </div>
-                            {group.items.map((r) => (
+                            {/* Collapsible match details */}
+                            {group.items.length > 0 && (
+                              <div className="flex items-center px-2 py-0.5">
+                                <button
+                                  className="text-xs opacity-40 hover:opacity-70 flex items-center gap-1"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedResults((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(group.filePath)) next.delete(group.filePath);
+                                      else next.add(group.filePath);
+                                      return next;
+                                    });
+                                  }}>
+                                  <span>{expandedResults.has(group.filePath) ? "▼" : "▶"}</span>
+                                  <span>매칭 섹션</span>
+                                </button>
+                              </div>
+                            )}
+                            {expandedResults.has(group.filePath) && group.items.map((r) => (
                               <div key={r.chunk_id}
                                 className="px-3 py-1 text-xs cursor-pointer hover:opacity-80"
                                 style={{ color: "var(--text-secondary)" }}
