@@ -83,14 +83,22 @@ jobs:
           }
           EOF
 
-      # Upload all desktop artifacts
+      # Rename artifacts to remove spaces, then upload
+      - name: Prepare artifacts
+        run: |
+          BUNDLE="target/universal-apple-darwin/release/bundle"
+          cp "${BUNDLE}/dmg/"*.dmg ./Obsidian-Nexus.dmg || true
+          cp "${BUNDLE}/macos/Obsidian Nexus.app.tar.gz" ./Obsidian.Nexus.app.tar.gz || true
+          cp "${BUNDLE}/macos/Obsidian Nexus.app.tar.gz.sig" ./Obsidian.Nexus.app.tar.gz.sig || true
+          ls -la Obsidian* latest.json
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            target/universal-apple-darwin/release/bundle/dmg/*.dmg
-            target/universal-apple-darwin/release/bundle/macos/Obsidian Nexus.app.tar.gz
-            target/universal-apple-darwin/release/bundle/macos/Obsidian Nexus.app.tar.gz.sig
+            Obsidian-Nexus.dmg
+            Obsidian.Nexus.app.tar.gz
+            Obsidian.Nexus.app.tar.gz.sig
             latest.json
 
   cli:
