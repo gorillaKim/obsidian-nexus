@@ -46,12 +46,26 @@ jobs:
         run: cargo tauri build --target universal-apple-darwin
 
       # Generate latest.json for updater
+      - name: List bundle output
+        run: find target/universal-apple-darwin/release/bundle -type f | head -30
+
       - name: Generate latest.json
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           BUNDLE_DIR="target/universal-apple-darwin/release/bundle"
-          SIG=$(cat "${BUNDLE_DIR}/macos/Obsidian Nexus.app.tar.gz.sig")
-          cat > latest.json << ENDJSON
+
+          # Check if signature exists (requires TAURI_SIGNING_PRIVATE_KEY secret)
+          SIG_FILE="${BUNDLE_DIR}/macos/Obsidian Nexus.app.tar.gz.sig"
+          if [ -f "${SIG_FILE}" ]; then
+            SIG=$(cat "${SIG_FILE}")
+          else
+            echo "WARNING: No signature file found. Ensure TAURI_SIGNING_PRIVATE_KEY secret is set."
+            echo "Available files:"
+            ls -la "${BUNDLE_DIR}/macos/" || true
+            SIG=""
+          fi
+
+          cat > latest.json <<EOF
           {
             "version": "${VERSION}",
             "notes": "See the assets to download this version.",
@@ -67,7 +81,7 @@ jobs:
               }
             }
           }
-          ENDJSON
+          EOF
 
       # Upload all desktop artifacts
       - name: Upload to GitHub Release
