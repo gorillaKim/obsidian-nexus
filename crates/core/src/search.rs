@@ -470,6 +470,18 @@ pub fn enrich_results(
     Ok(())
 }
 
+/// Filter search results by tags (post-enrich). Keeps results that have ANY of the specified tags.
+pub fn filter_by_tags(results: &mut Vec<SearchResult>, tags: &[&str]) {
+    if tags.is_empty() { return; }
+    results.retain(|r| {
+        if let Some(ref result_tags) = r.tags {
+            tags.iter().any(|t| result_tags.iter().any(|rt| rt.eq_ignore_ascii_case(t)))
+        } else {
+            false
+        }
+    });
+}
+
 /// Record a document view for popularity tracking
 pub fn record_view(pool: &DbPool, document_id: &str) -> Result<()> {
     let conn = pool.get()?;

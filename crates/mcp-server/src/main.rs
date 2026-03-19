@@ -88,7 +88,8 @@ fn handle_tools_list(id: &Value) -> Value {
                             "limit": { "type": "integer", "description": "Max results (default: 20)", "default": 20 },
                             "mode": { "type": "string", "description": "Search mode: hybrid (default), keyword, vector", "default": "hybrid" },
                             "enrich": { "type": "boolean", "description": "Include metadata (tags, backlink_count, view_count, last_modified) in results (default: true)", "default": true },
-                            "use_popularity": { "type": "boolean", "description": "Boost results by popularity. Default: true if project specified, false otherwise" }
+                            "use_popularity": { "type": "boolean", "description": "Boost results by popularity. Default: true if project specified, false otherwise" },
+                            "tags": { "type": "array", "items": { "type": "string" }, "description": "Filter results by tags (optional, matches ANY tag)" }
                         },
                         "required": ["query"]
                     }
@@ -279,6 +280,14 @@ fn tool_search(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::resu
     if enrich {
         nexus_core::search::enrich_results(pool, &mut results, use_popularity)
             .map_err(|e| e.to_string())?;
+    }
+
+    // Optional tag filtering (requires enrich=true for tags to be populated)
+    if let Some(tags_val) = args.get("tags").and_then(|t| t.as_array()) {
+        let tags: Vec<&str> = tags_val.iter().filter_map(|v| v.as_str()).collect();
+        if !tags.is_empty() {
+            nexus_core::search::filter_by_tags(&mut results, &tags);
+        }
     }
 
     serde_json::to_string_pretty(&results).map_err(|e| e.to_string())
