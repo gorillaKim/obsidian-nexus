@@ -8,7 +8,6 @@ permissions:
   contents: write
 
 jobs:
-  # Job 1: Desktop — universal binary (aarch64 + x86_64 단일 빌드)
   desktop:
     runs-on: macos-14
     steps:
@@ -22,7 +21,7 @@ jobs:
       - run: corepack enable && pnpm install
         working-directory: apps/desktop
 
-      # Build sidecars for both architectures before Tauri build
+      # Build sidecars for both architectures
       - name: Build sidecars (aarch64)
         run: |
           cargo build --release --target aarch64-apple-darwin -p nexus-cli -p nexus-mcp-server
@@ -35,19 +34,51 @@ jobs:
           cp target/x86_64-apple-darwin/release/nexus apps/desktop/src-tauri/binaries/nexus-x86_64-apple-darwin
           cp target/x86_64-apple-darwin/release/nexus-mcp-server apps/desktop/src-tauri/binaries/nexus-mcp-server-x86_64-apple-darwin
 
-      - uses: tauri-apps/tauri-action@v0
+      # Build Tauri app directly (not via tauri-action)
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2"
+
+      - name: Build Tauri universal binary
+        working-directory: apps/desktop
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Obsidian Nexus ${{ github.ref_name }}'
-          releaseBody: 'See the assets to download this version.'
-          projectPath: apps/desktop
-          args: --target universal-apple-darwin
+        run: cargo tauri build --target universal-apple-darwin
 
-  # Job 2: CLI — 아키텍처별 matrix (release는 desktop job이 생성)
+      # Generate latest.json for updater
+      - name: Generate latest.json
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          BUNDLE_DIR="target/universal-apple-darwin/release/bundle"
+          SIG=$(cat "${BUNDLE_DIR}/macos/Obsidian Nexus.app.tar.gz.sig")
+          cat > latest.json << ENDJSON
+          {
+            "version": "${VERSION}",
+            "notes": "See the assets to download this version.",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "${SIG}",
+                "url": "https://github.com/gorillaKim/obsidian-nexus/releases/download/${GITHUB_REF_NAME}/Obsidian.Nexus.app.tar.gz"
+              },
+              "darwin-x86_64": {
+                "signature": "${SIG}",
+                "url": "https://github.com/gorillaKim/obsidian-nexus/releases/download/${GITHUB_REF_NAME}/Obsidian.Nexus.app.tar.gz"
+              }
+            }
+          }
+          ENDJSON
+
+      # Upload all desktop artifacts
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            target/universal-apple-darwin/release/bundle/macos/Obsidian Nexus.app.tar.gz
+            target/universal-apple-darwin/release/bundle/macos/Obsidian Nexus.app.tar.gz.sig
+            latest.json
+
   cli:
     needs: desktop
     strategy:
