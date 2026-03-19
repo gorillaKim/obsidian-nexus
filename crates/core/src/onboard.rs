@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 
 const LIBRARIAN_AGENT_TEMPLATE: &str = include_str!("templates/librarian_agent.md");
 const LIBRARIAN_SKILL_TEMPLATE: &str = include_str!("templates/librarian_skill.md");
+const FRONTMATTER_GUIDE_TEMPLATE: &str = include_str!("templates/frontmatter_guide.md");
 
 #[derive(Debug)]
 pub struct OnboardResult {
@@ -75,6 +76,10 @@ pub fn onboard(project_path: Option<&str>, force: bool) -> crate::Result<Onboard
     // 3. Create .claude/skills/librarian/SKILL.md
     let skill_path = project_path.join(".claude/skills/librarian/SKILL.md");
     write_template(&skill_path, LIBRARIAN_SKILL_TEMPLATE, force, &mut created, &mut skipped)?;
+
+    // 4. Create .claude/templates/frontmatter-guide.md
+    let frontmatter_path = project_path.join(".claude/templates/frontmatter-guide.md");
+    write_template(&frontmatter_path, FRONTMATTER_GUIDE_TEMPLATE, force, &mut created, &mut skipped)?;
 
     Ok(OnboardResult {
         project_path,

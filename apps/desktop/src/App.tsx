@@ -760,56 +760,205 @@ function App() {
         {tab === "settings" && <SettingsTab />}
 
         {tab === "guide" && (
-          <div className="max-w-2xl mx-auto">
-            <h2 className="text-lg font-bold mb-4" style={{ color: "var(--accent)" }}>Obsidian Nexus 사용 가이드</h2>
+          <div className="max-w-3xl mx-auto">
+            <h2 className="text-lg font-bold mb-6" style={{ color: "var(--accent)" }}>Obsidian Nexus 사용 가이드</h2>
 
-            <div className="space-y-4">
-              <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
-                <h3 className="font-medium mb-2">1. 볼트 추가</h3>
-                <p className="text-sm opacity-70">
-                  <strong>프로젝트</strong> 탭에서 "볼트 폴더 추가" 버튼을 클릭하세요.
-                  Obsidian 볼트 폴더를 선택하면 자동으로 등록, 인덱싱, Obsidian 연동이 완료됩니다.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
-                <h3 className="font-medium mb-2">2. 문서 검색</h3>
-                <p className="text-sm opacity-70">
-                  <strong>검색</strong> 탭에서 키워드를 입력하면 모든 볼트에서 문서를 찾습니다.
-                  특정 프로젝트만 검색하려면 드롭다운에서 선택하세요.
-                  검색 결과를 클릭하면 문서 내용을 바로 확인할 수 있습니다.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
-                <h3 className="font-medium mb-2">3. 문서 탐색</h3>
-                <p className="text-sm opacity-70">
-                  <strong>검색</strong> 탭 하단의 프로젝트 버튼을 클릭하면 해당 프로젝트의 모든 문서 목록을 볼 수 있습니다.
-                  문서를 클릭하면 마크다운으로 렌더링된 내용을 확인할 수 있고,
-                  "Obsidian에서 열기" 버튼으로 Obsidian 앱에서 편집할 수 있습니다.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
-                <h3 className="font-medium mb-2">4. 에이전트 연동 (CLI / MCP)</h3>
-                <p className="text-sm opacity-70 mb-2">
-                  AI 에이전트가 CLI 또는 MCP를 통해 문서를 검색하고 내용을 가져올 수 있습니다.
-                </p>
-                <div className="text-xs p-3 rounded" style={{ background: "var(--bg-primary)" }}>
-                  <p className="opacity-60 mb-1"># CLI 검색</p>
-                  <p>nexus search "검색어" --project "프로젝트명"</p>
-                  <p className="opacity-60 mt-2 mb-1"># MCP (Claude Code에서 자동 사용)</p>
-                  <p>앱 설치 시 자동으로 MCP 서버가 등록됩니다</p>
+            {/* 데스크톱 앱 */}
+            <div className="mb-8">
+              <h3 className="text-base font-bold mb-3 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+                <span className="inline-block w-6 h-6 rounded text-center text-xs leading-6" style={{ background: "var(--accent)", color: "var(--bg-primary)" }}>D</span>
+                데스크톱 앱
+              </h3>
+              <div className="space-y-3">
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">볼트 추가</h4>
+                  <p className="text-sm opacity-70 mb-2">
+                    <strong>프로젝트</strong> 탭에서 "볼트 폴더 추가" 버튼을 클릭하세요.
+                    Obsidian 볼트 폴더를 선택하면 자동으로 등록, 인덱싱, Obsidian 연동이 완료됩니다.
+                  </p>
+                  <div className="text-xs p-2 rounded" style={{ background: "var(--bg-primary)", borderLeft: `3px solid var(--accent)` }}>
+                    <strong>사전 준비:</strong> 등록하려는 폴더를 먼저 Obsidian 앱에서 한 번 열어 볼트로 초기화해야 합니다.
+                    Obsidian이 <code className="px-1 rounded" style={{ background: "var(--bg-secondary)" }}>.obsidian/</code> 폴더를 생성해야 Nexus가 볼트로 인식할 수 있습니다.
+                  </div>
+                </div>
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">문서 검색</h4>
+                  <p className="text-sm opacity-70">
+                    <strong>검색</strong> 탭에서 키워드를 입력하면 모든 볼트에서 문서를 찾습니다.
+                    키워드 / 벡터 / 하이브리드 검색 모드를 지원하며, 프로젝트와 태그 필터링이 가능합니다.
+                  </p>
+                </div>
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">문서 탐색 & 편집</h4>
+                  <p className="text-sm opacity-70">
+                    검색 결과를 클릭하면 마크다운으로 렌더링된 내용을 확인할 수 있고,
+                    "Obsidian에서 열기" 버튼으로 Obsidian 앱에서 바로 편집할 수 있습니다.
+                  </p>
+                </div>
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">자동 설정</h4>
+                  <p className="text-sm opacity-70">
+                    앱 실행 시 자동으로 MCP 서버를 AI 도구(Claude Desktop, Claude Code, Gemini CLI)에 등록하고,
+                    터미널에서 <code className="px-1 rounded text-xs" style={{ background: "var(--bg-primary)" }}>nexus</code> 명령어를 바로 사용할 수 있도록 PATH에 추가합니다.
+                  </p>
                 </div>
               </div>
+            </div>
 
-              <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
-                <h3 className="font-medium mb-2">5. 인덱싱</h3>
-                <p className="text-sm opacity-70">
-                  볼트에 문서를 추가/수정하면 <strong>프로젝트</strong> 탭에서 "인덱싱" 버튼을 눌러 업데이트하세요.
-                  변경된 문서만 자동으로 감지하여 빠르게 인덱싱됩니다.
-                  CLI에서 <code className="px-1 rounded text-xs" style={{ background: "var(--bg-primary)" }}>nexus watch</code>를 실행하면 실시간 자동 인덱싱도 가능합니다.
-                </p>
+            {/* CLI */}
+            <div className="mb-8">
+              <h3 className="text-base font-bold mb-3 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+                <span className="inline-block w-6 h-6 rounded text-center text-xs leading-6" style={{ background: "var(--accent)", color: "var(--bg-primary)" }}>C</span>
+                CLI (Command Line Interface)
+              </h3>
+              <p className="text-sm opacity-70 mb-3">
+                데스크톱 앱 설치 시 자동으로 포함됩니다. 터미널에서 <code className="px-1 rounded text-xs" style={{ background: "var(--bg-primary)" }}>nexus</code> 명령어로 사용하세요.
+              </p>
+              <div className="space-y-3">
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">프로젝트 관리</h4>
+                  <div className="text-xs p-3 rounded space-y-1 font-mono" style={{ background: "var(--bg-primary)" }}>
+                    <p><span className="opacity-50"># 볼트 등록</span></p>
+                    <p>nexus project add "My Vault" /path/to/vault</p>
+                    <p><span className="opacity-50"># 프로젝트 목록</span></p>
+                    <p>nexus project list</p>
+                    <p><span className="opacity-50"># 프로젝트 상세 정보</span></p>
+                    <p>nexus project info "project-id"</p>
+                  </div>
+                </div>
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">검색</h4>
+                  <div className="text-xs p-3 rounded space-y-1 font-mono" style={{ background: "var(--bg-primary)" }}>
+                    <p><span className="opacity-50"># 키워드 검색 (기본)</span></p>
+                    <p>nexus search "검색어"</p>
+                    <p><span className="opacity-50"># 특정 프로젝트에서 벡터 검색</span></p>
+                    <p>nexus search "의미 검색" --project "My Vault" --mode vector</p>
+                    <p><span className="opacity-50"># 하이브리드 검색 (키워드 + 벡터)</span></p>
+                    <p>nexus search "질문" --mode hybrid --limit 10</p>
+                  </div>
+                </div>
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">문서 접근</h4>
+                  <div className="text-xs p-3 rounded space-y-1 font-mono" style={{ background: "var(--bg-primary)" }}>
+                    <p><span className="opacity-50"># 문서 내용 가져오기</span></p>
+                    <p>nexus doc get "project-id" "notes/file.md"</p>
+                    <p><span className="opacity-50"># 문서 메타데이터 (태그, 링크)</span></p>
+                    <p>nexus doc meta "project-id" "notes/file.md"</p>
+                    <p><span className="opacity-50"># 프로젝트 문서 목록</span></p>
+                    <p>nexus doc list "project-id"</p>
+                  </div>
+                </div>
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">인덱싱 & 자동 감시</h4>
+                  <div className="text-xs p-3 rounded space-y-1 font-mono" style={{ background: "var(--bg-primary)" }}>
+                    <p><span className="opacity-50"># 수동 인덱싱 (변경분만)</span></p>
+                    <p>nexus index "project-id"</p>
+                    <p><span className="opacity-50"># 실시간 파일 감시 + 자동 인덱싱</span></p>
+                    <p>nexus watch "project-id"</p>
+                  </div>
+                </div>
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">프로젝트 온보딩</h4>
+                  <div className="text-xs p-3 rounded space-y-1 font-mono" style={{ background: "var(--bg-primary)" }}>
+                    <p><span className="opacity-50"># 현재 프로젝트에 MCP + librarian 스킬 자동 설정</span></p>
+                    <p>nexus onboard</p>
+                    <p><span className="opacity-50"># 특정 경로 지정</span></p>
+                    <p>nexus onboard /path/to/project</p>
+                  </div>
+                  <p className="text-xs opacity-60 mt-2">.mcp.json, .claude/agents, .claude/skills 파일이 자동 생성됩니다.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* MCP 서버 */}
+            <div className="mb-8">
+              <h3 className="text-base font-bold mb-3 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+                <span className="inline-block w-6 h-6 rounded text-center text-xs leading-6" style={{ background: "var(--accent)", color: "var(--bg-primary)" }}>M</span>
+                MCP 서버 (AI 에이전트 연동)
+              </h3>
+              <p className="text-sm opacity-70 mb-3">
+                앱 실행 시 자동으로 AI 도구에 등록됩니다. Claude Code, Claude Desktop, Gemini CLI에서 자동 사용 가능합니다.
+              </p>
+              <div className="space-y-3">
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">검색 도구</h4>
+                  <div className="text-xs space-y-2">
+                    <div className="flex gap-2">
+                      <code className="px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--bg-primary)" }}>nexus_search</code>
+                      <span className="opacity-70">하이브리드/키워드/벡터 검색, 태그 필터, 인기도 부스트</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--bg-primary)" }}>nexus_resolve_alias</code>
+                      <span className="opacity-70">별칭으로 문서 찾기</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">문서 접근 도구</h4>
+                  <div className="text-xs space-y-2">
+                    <div className="flex gap-2">
+                      <code className="px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--bg-primary)" }}>nexus_get_document</code>
+                      <span className="opacity-70">문서 전체 내용 가져오기</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--bg-primary)" }}>nexus_get_section</code>
+                      <span className="opacity-70">특정 섹션만 가져오기 (토큰 절약!)</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--bg-primary)" }}>nexus_get_metadata</code>
+                      <span className="opacity-70">프론트매터, 태그, 인덱싱 상태</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">그래프 탐색 도구</h4>
+                  <div className="text-xs space-y-2">
+                    <div className="flex gap-2">
+                      <code className="px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--bg-primary)" }}>nexus_get_backlinks</code>
+                      <span className="opacity-70">이 문서를 링크하는 문서들</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--bg-primary)" }}>nexus_get_links</code>
+                      <span className="opacity-70">이 문서가 링크하는 문서들</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+                  <h4 className="font-medium mb-2 text-sm">관리 도구</h4>
+                  <div className="text-xs space-y-2">
+                    <div className="flex gap-2">
+                      <code className="px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--bg-primary)" }}>nexus_list_projects</code>
+                      <span className="opacity-70">등록된 볼트 목록</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--bg-primary)" }}>nexus_list_documents</code>
+                      <span className="opacity-70">프로젝트 문서 목록 (태그 필터)</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--bg-primary)" }}>nexus_index_project</code>
+                      <span className="opacity-70">증분 / 전체 리인덱스</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--bg-primary)" }}>nexus_status</code>
+                      <span className="opacity-70">시스템 상태 확인 (Ollama, DB)</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <code className="px-1.5 py-0.5 rounded shrink-0" style={{ background: "var(--bg-primary)" }}>nexus_onboard</code>
+                      <span className="opacity-70">프로젝트에 librarian 스킬 자동 설정</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 추천 워크플로우 */}
+            <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--accent)33` }}>
+              <h3 className="font-medium mb-2 text-sm" style={{ color: "var(--accent)" }}>추천 워크플로우</h3>
+              <div className="text-sm opacity-70 space-y-1">
+                <p>1. 데스크톱 앱으로 Obsidian 볼트 등록 & 인덱싱</p>
+                <p>2. <code className="px-1 rounded text-xs" style={{ background: "var(--bg-primary)" }}>nexus onboard</code>로 프로젝트에 MCP 연동 설정</p>
+                <p>3. AI 에이전트가 <code className="px-1 rounded text-xs" style={{ background: "var(--bg-primary)" }}>nexus_search</code> → <code className="px-1 rounded text-xs" style={{ background: "var(--bg-primary)" }}>nexus_get_section</code>으로 필요한 문서만 가져옴</p>
+                <p>4. <code className="px-1 rounded text-xs" style={{ background: "var(--bg-primary)" }}>nexus_get_backlinks</code>로 관련 문서 탐색</p>
               </div>
             </div>
           </div>

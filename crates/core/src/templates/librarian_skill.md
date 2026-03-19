@@ -67,7 +67,7 @@ Agent(subagent_type: "librarian", model: "haiku",
 **Document creation request:**
 ```
 Agent(subagent_type: "librarian", model: "haiku",
-  prompt: "Document creation request: '{topic}'. Execute Phase D. CWD: {cwd}",
+  prompt: "Document creation request: '{topic}'. Execute Phase D. Follow the frontmatter guide in your agent definition. CWD: {cwd}",
   description: "librarian doc creation")
 ```
 

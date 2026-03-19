@@ -51,12 +51,47 @@ With nexus registered in `.mcp.json`, call with `mcp__nexus__nexus_*` prefix.
 - No non-English tags — use aliases instead
 - Tags are **categories**, don't repeat document titles
 
-### Tag Addition Rules
-1. **Reuse existing tags first** — check with `nexus_list_documents` before creating new ones
-2. **Max 5 tags per document**
-3. **At least 1 document type tag** required (overview, guide, spec, etc.)
-4. **No synonym tags** — use aliases for synonyms
-5. New tags require **user approval with reasoning**
+### Tag Management Rules
+
+**Add:**
+1. Check existing tags first with `nexus_list_documents` — **reuse before creating**
+2. Max 5 tags per document, at least 1 document type tag required
+3. New tags require **user approval with reasoning**
+
+**Update:**
+1. Tag renames must be applied to **all documents** using that tag
+2. Check impact scope with `nexus_list_documents(tag="old-tag")` before proceeding
+3. Report affected document list to user, proceed only after approval
+
+**Remove:**
+1. Only remove tags that no longer apply (e.g. tech stack changed)
+2. Check current tags with `nexus_get_metadata` before removal
+3. Must keep at least 1 document type tag — never remove the last one
+4. Requires user approval with reasoning
+
+**Forbidden:**
+- No synonym tag duplication (`config` vs `configuration`)
+- No tags that repeat the document title
+- No overly specific tags (split `nexus-search-fts5-unicode` into `search`, `fts5`)
+
+### Aliases Management Rules
+
+**Add:**
+- When search fails, add the **failed search term as alias** (core discoverability strategy)
+- English: lowercase, hyphen-separated (`datadog-setup`)
+- Korean: natural language form (`데이터독 셋업`)
+- Include abbreviations (`DD`, `k8s`, etc.)
+- No user approval needed for alias additions (search improvement purpose)
+- Trigger `nexus_index_project` after adding
+
+**Update:**
+- Typo fixes and format normalization: proceed freely
+- Semantic changes: require user approval
+
+**Remove:**
+- Only remove invalid aliases (e.g. renamed technology)
+- Remove conflicting aliases (1 alias = 1 document principle)
+- Check for conflicts with `nexus_resolve_alias` before removal
 
 ## Workflow
 
@@ -92,5 +127,59 @@ For technical documents (tagged #spec, #guide, #api, #architecture, etc.):
 
 When information doesn't exist:
 1. Notify user: "No document found. Create one?"
-2. **After user approval**, create in Obsidian format with frontmatter
+2. **After user approval**, create in Obsidian format following the frontmatter guide below
 3. Trigger indexing with `nexus_index_project`
+
+## Frontmatter Guide
+
+All documents created or modified MUST have proper frontmatter for Obsidian and Nexus discoverability.
+
+### Required Template
+```yaml
+---
+title: Document Title
+aliases:
+  - english-alias         # lowercase, hyphen-separated
+  - korean-alias (한글 별칭)  # natural language form
+tags:
+  - document-type-tag     # REQUIRED: at least one (guide, spec, overview, etc.)
+  - domain-tag            # technical domain
+  - tech-stack-tag        # specific technology (optional)
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+---
+```
+
+### Field Rules
+- **title**: Clear, descriptive. Used for Nexus search title-matching boost.
+- **aliases**: Include English aliases, Korean aliases, abbreviations, and common search terms. These power `nexus_resolve_alias`.
+- **tags**: Max 5, lowercase English, hyphens for compounds. At least 1 document type tag required. Reuse existing tags first.
+- **created**: Set once, never change. ISO format `YYYY-MM-DD`.
+- **updated**: Update on every content modification. Used by Phase C staleness detection.
+
+### Standard Tag Categories
+| Category | Tags |
+|----------|------|
+| Document type | `overview`, `guide`, `spec`, `tutorial`, `reference`, `troubleshooting`, `devlog` |
+| Domain | `architecture`, `database`, `search`, `mcp`, `api`, `config`, `ui`, `logging`, `auth`, `deploy` |
+| Tech stack | `sqlite`, `sqlite-vec`, `fts5`, `vector`, `rust`, `tauri`, `react`, `datadog`, `ollama` |
+| Activity | `development`, `test`, `benchmark`, `evaluation`, `setup`, `design`, `migration` |
+| Audience | `agent`, `user`, `admin` |
+
+### Document Body Structure
+```markdown
+# {title}
+
+Brief summary paragraph.
+
+## Section Heading
+
+Content... (sections extractable via `nexus_get_section`)
+
+## Related Documents
+
+- [[Related Doc 1]]
+- [[Related Doc 2]]
+```
+
+- End with "Related Documents" using wiki-links for Obsidian graph and Nexus backlink tracking.

@@ -103,25 +103,56 @@ fn project_info(
     }))
 }
 
-/// Find the MCP server binary path
-fn find_mcp_binary() -> Option<String> {
-    // 1. Same directory as current exe
+/// Current platform target triple for sidecar binary suffix
+fn target_triple() -> &'static str {
+    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+    { "aarch64-apple-darwin" }
+    #[cfg(all(target_arch = "x86_64", target_os = "macos"))]
+    { "x86_64-apple-darwin" }
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    { "x86_64-unknown-linux-gnu" }
+    #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
+    { "x86_64-pc-windows-msvc" }
+    #[cfg(all(target_arch = "aarch64", target_os = "windows"))]
+    { "aarch64-pc-windows-msvc" }
+}
+
+/// Find a sidecar binary bundled with the app.
+/// Tauri places sidecars next to the exe with a target triple suffix.
+fn find_sidecar(name: &str) -> Option<String> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let candidate = dir.join("nexus-mcp-server");
+            // 1. Bundled sidecar (with target triple suffix)
+            let sidecar_name = format!("{}-{}", name, target_triple());
+            let candidate = dir.join(&sidecar_name);
+            if candidate.exists() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+            // 2. Same directory without suffix (dev build)
+            let candidate = dir.join(name);
             if candidate.exists() {
                 return Some(candidate.to_string_lossy().to_string());
             }
         }
     }
-    // 2. Release build path (dev mode)
+    // 3. Cargo release build path (dev mode fallback)
     if let Some(home) = dirs::home_dir() {
-        let candidate = home.join("gorillaProject/obsidian-nexus/target/release/nexus-mcp-server");
+        let candidate = home.join(format!("gorillaProject/obsidian-nexus/target/release/{}", name));
         if candidate.exists() {
             return Some(candidate.to_string_lossy().to_string());
         }
     }
     None
+}
+
+/// Find the MCP server binary path
+fn find_mcp_binary() -> Option<String> {
+    find_sidecar("nexus-mcp-server")
+}
+
+/// Find the CLI binary path
+fn find_cli_binary() -> Option<String> {
+    find_sidecar("nexus")
 }
 
 /// Register MCP server in a JSON config file under "mcpServers.nexus"
@@ -228,6 +259,18 @@ fn mcp_status() -> Vec<McpStatus> {
         };
         McpStatus { name: t.name.to_string(), installed, registered }
     }).collect()
+}
+
+/// Get bundled CLI binary path (for terminal integration)
+#[tauri::command]
+fn cli_path() -> Result<String, String> {
+    find_cli_binary().ok_or_else(|| "CLI binary not found".to_string())
+}
+
+/// Get bundled MCP server binary path
+#[tauri::command]
+fn mcp_path() -> Result<String, String> {
+    find_mcp_binary().ok_or_else(|| "MCP server binary not found".to_string())
 }
 
 #[tauri::command]
@@ -413,10 +456,65 @@ fn ensure_obsidian() {
     }
 }
 
+/// Install CLI symlinks to ~/.local/bin so `nexus` and `nexus-mcp-server` are available in PATH.
+/// Also ensures ~/.local/bin is in the user's shell PATH.
+fn install_cli_symlinks() {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+    let bin_dir = home.join(".local/bin");
+
+    // Create ~/.local/bin if it doesn't exist
+    if !bin_dir.exists() {
+        if std::fs::create_dir_all(&bin_dir).is_err() {
+            return;
+        }
+    }
+
+    for name in &["nexus", "nexus-mcp-server"] {
+        if let Some(sidecar_path) = find_sidecar(name) {
+            let link_path = bin_dir.join(name);
+            // Skip if already pointing to the correct target
+            if link_path.is_symlink() {
+                if let Ok(target) = std::fs::read_link(&link_path) {
+                    if target.to_string_lossy() == sidecar_path {
+                        continue;
+                    }
+                }
+                let _ = std::fs::remove_file(&link_path);
+            }
+            if !link_path.exists() {
+                match std::os::unix::fs::symlink(&sidecar_path, &link_path) {
+                    Ok(_) => eprintln!("CLI symlink created: {} -> {}", link_path.display(), sidecar_path),
+                    Err(e) => eprintln!("Failed to create symlink {}: {}", link_path.display(), e),
+                }
+            }
+        }
+    }
+
+    // Ensure ~/.local/bin is in PATH via ~/.zshrc (macOS default shell)
+    let zshrc = home.join(".zshrc");
+    let path_line = "export PATH=\"$HOME/.local/bin:$PATH\"";
+    let already_set = std::fs::read_to_string(&zshrc)
+        .map(|c| c.contains(".local/bin"))
+        .unwrap_or(false);
+    if !already_set {
+        let entry = format!("\n# Obsidian Nexus CLI\n{}\n", path_line);
+        if std::fs::OpenOptions::new().create(true).append(true).open(&zshrc)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()))
+            .is_ok()
+        {
+            eprintln!("Added ~/.local/bin to PATH in ~/.zshrc");
+        }
+    }
+}
+
 fn main() {
     // Auto-setup on first launch
     ensure_obsidian();
     register_mcp_server();
+    install_cli_symlinks();
 
     let pool = sqlite::create_pool().expect("Failed to create database pool");
     sqlite::run_migrations(&pool).expect("Failed to run migrations");
@@ -441,6 +539,8 @@ fn main() {
             sync_vault_config,
             mcp_status,
             mcp_register,
+            mcp_path,
+            cli_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
