@@ -44,6 +44,18 @@ pub fn fts_search(
         let escaped = trimmed.replace('"', "\"\"");
         let mut parts: Vec<String> = vec![format!("\"{}\"", escaped)];
 
+        // Split space-separated tokens for broader matching (multi-word queries)
+        let words: Vec<&str> = trimmed.split_whitespace().collect();
+        if words.len() > 1 {
+            for word in &words {
+                let w = word.trim();
+                if !w.is_empty() {
+                    let esc = w.replace('"', "\"\"");
+                    parts.push(format!("\"{}\"", esc));
+                }
+            }
+        }
+
         // Split underscore terms into individual words for broader matching
         if trimmed.contains('_') {
             for word in trimmed.split('_') {
@@ -64,7 +76,7 @@ pub fn fts_search(
 
     let sql = if project_id.is_some() {
         "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
-                snippet(chunks_fts, 0, '<b>', '</b>', '...', 32) as snippet,
+                snippet(chunks_fts, 0, '<b>', '</b>', '...', 64) as snippet,
                 rank
          FROM chunks_fts
          JOIN chunks c ON chunks_fts.rowid = c.rowid
@@ -76,7 +88,7 @@ pub fn fts_search(
          LIMIT ?3"
     } else {
         "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
-                snippet(chunks_fts, 0, '<b>', '</b>', '...', 32) as snippet,
+                snippet(chunks_fts, 0, '<b>', '</b>', '...', 64) as snippet,
                 rank
          FROM chunks_fts
          JOIN chunks c ON chunks_fts.rowid = c.rowid
@@ -376,58 +388,78 @@ pub fn enrich_results(
     if results.is_empty() { return Ok(()); }
     let conn = pool.get()?;
 
-    // Collect unique document IDs for batch queries
+    // Collect unique document IDs for scoped batch queries
     let mut doc_ids: Vec<String> = results.iter().map(|r| r.document_id.clone()).collect();
     doc_ids.sort();
     doc_ids.dedup();
+    let placeholders = doc_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
 
-    // Batch: tags per document
+    // Batch: tags per document (scoped)
     let mut doc_tags: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    let mut tag_stmt = conn.prepare_cached(
-        "SELECT dt.document_id, t.name FROM tags t
-         JOIN document_tags dt ON t.id = dt.tag_id"
-    )?;
-    let tag_rows = tag_stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?.collect::<std::result::Result<Vec<_>, _>>()?;
-    for (did, tag) in tag_rows {
-        doc_tags.entry(did).or_default().push(tag);
+    {
+        let sql = format!(
+            "SELECT dt.document_id, t.name FROM tags t
+             JOIN document_tags dt ON t.id = dt.tag_id
+             WHERE dt.document_id IN ({})", placeholders
+        );
+        let mut tag_stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = doc_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let tag_rows = tag_stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        for (did, tag) in tag_rows {
+            doc_tags.entry(did).or_default().push(tag);
+        }
     }
 
-    // Batch: backlink counts
+    // Batch: backlink counts (scoped)
     let mut backlink_counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
-    let mut bl_stmt = conn.prepare_cached(
-        "SELECT target_doc_id, COUNT(*) FROM wiki_links WHERE target_doc_id IS NOT NULL GROUP BY target_doc_id"
-    )?;
-    let bl_rows = bl_stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-    })?.collect::<std::result::Result<Vec<_>, _>>()?;
-    for (did, count) in bl_rows {
-        backlink_counts.insert(did, count);
+    {
+        let sql = format!(
+            "SELECT target_doc_id, COUNT(*) FROM wiki_links
+             WHERE target_doc_id IN ({}) GROUP BY target_doc_id", placeholders
+        );
+        let mut bl_stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = doc_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let bl_rows = bl_stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        for (did, count) in bl_rows {
+            backlink_counts.insert(did, count);
+        }
     }
 
-    // Batch: view counts
+    // Batch: view counts (scoped)
     let mut view_counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
-    let mut vc_stmt = conn.prepare_cached(
-        "SELECT document_id, COUNT(*) FROM document_views GROUP BY document_id"
-    )?;
-    let vc_rows = vc_stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-    })?.collect::<std::result::Result<Vec<_>, _>>()?;
-    for (did, count) in vc_rows {
-        view_counts.insert(did, count);
+    {
+        let sql = format!(
+            "SELECT document_id, COUNT(*) FROM document_views
+             WHERE document_id IN ({}) GROUP BY document_id", placeholders
+        );
+        let mut vc_stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = doc_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let vc_rows = vc_stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        for (did, count) in vc_rows {
+            view_counts.insert(did, count);
+        }
     }
 
-    // Batch: document metadata (title, last_modified)
+    // Batch: document metadata (scoped)
     let mut doc_meta: std::collections::HashMap<String, (Option<String>, Option<String>)> = std::collections::HashMap::new();
-    let mut meta_stmt = conn.prepare_cached(
-        "SELECT id, title, last_modified FROM documents"
-    )?;
-    let meta_rows = meta_stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?))
-    })?.collect::<std::result::Result<Vec<_>, _>>()?;
-    for (did, title, lm) in meta_rows {
-        doc_meta.insert(did, (title, lm));
+    {
+        let sql = format!(
+            "SELECT id, title, last_modified FROM documents WHERE id IN ({})", placeholders
+        );
+        let mut meta_stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = doc_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let meta_rows = meta_stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?))
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        for (did, title, lm) in meta_rows {
+            doc_meta.insert(did, (title, lm));
+        }
     }
 
     // Apply metadata to results + reranking

@@ -152,8 +152,22 @@ fn index_single_file(
     tx.execute("DELETE FROM document_tags WHERE document_id = ?1", params![doc_id])?;
 
     // 4. Insert new chunks + embeddings
+    // Derive title and file stem for searchability injection
+    let doc_title = parsed.title.as_deref().unwrap_or("");
+    let file_stem = std::path::Path::new(file_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .replace('-', " ");
+
     for (i, chunk) in parsed.chunks.iter().enumerate() {
         let chunk_id = Uuid::new_v4().to_string();
+        // Inject title + filename into first chunk so FTS5 can match by title/filename
+        let content = if i == 0 && !doc_title.is_empty() {
+            format!("{} {}\n{}", doc_title, file_stem, chunk.content)
+        } else {
+            chunk.content.clone()
+        };
         tx.execute(
             "INSERT INTO chunks (id, document_id, chunk_index, content, heading_path, start_line, end_line)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -161,7 +175,7 @@ fn index_single_file(
                 chunk_id,
                 doc_id,
                 chunk.index as i64,
-                chunk.content,
+                content,
                 chunk.heading_path,
                 chunk.start_line as i64,
                 chunk.end_line as i64,

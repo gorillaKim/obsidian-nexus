@@ -2,6 +2,35 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 
+const NEXUS_HELP_TEXT: &str = r#"# Obsidian Nexus MCP — Available Tools
+
+## Search & Discovery
+- **nexus_search** — Hybrid/keyword/vector search across vaults (supports tags filter, popularity boost)
+- **nexus_resolve_alias** — Find a document by its alias
+
+## Document Access
+- **nexus_get_document** — Get full document content by path
+- **nexus_get_section** — Get a specific section by heading (token-efficient!)
+- **nexus_get_metadata** — Get frontmatter, tags, indexing status
+
+## Graph Navigation
+- **nexus_get_backlinks** — Documents linking TO this document
+- **nexus_get_links** — Documents this document links TO
+
+## Project Management
+- **nexus_list_projects** — List all registered vaults
+- **nexus_list_documents** — List documents in a project (optional tag filter)
+- **nexus_index_project** — Trigger incremental or full reindex
+- **nexus_sync_config** — Sync project name from on-config.json
+- **nexus_status** — Check system health (Ollama, DB, config)
+
+## Recommended Workflow
+1. `nexus_search` → find relevant documents
+2. `nexus_get_section` → read only the section you need (saves tokens!)
+3. `nexus_get_backlinks` → discover related documents via graph
+4. `nexus_get_metadata` → check tags and popularity
+"#;
+
 fn main() -> Result<()> {
     // Initialize database
     let pool = nexus_core::db::sqlite::create_pool()?;
@@ -79,7 +108,7 @@ fn handle_tools_list(id: &Value) -> Value {
             "tools": [
                 {
                     "name": "nexus_search",
-                    "description": "Search across indexed Obsidian documents using FTS5 full-text search",
+                    "description": "Search across indexed Obsidian documents (hybrid/keyword/vector modes with metadata reranking)",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -206,6 +235,22 @@ fn handle_tools_list(id: &Value) -> Value {
                         },
                         "required": ["project", "alias"]
                     }
+                },
+                {
+                    "name": "nexus_status",
+                    "description": "Check system health: Ollama server, embedding model, database, and config status",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "nexus_help",
+                    "description": "Show available Obsidian Nexus MCP tools and recommended workflows",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
                 }
             ]
         }
@@ -228,6 +273,8 @@ fn handle_tools_call(id: &Value, params: &Value, pool: &nexus_core::db::sqlite::
         "nexus_get_backlinks" => tool_get_backlinks(&args, pool),
         "nexus_get_links" => tool_get_links(&args, pool),
         "nexus_resolve_alias" => tool_resolve_alias(&args, pool),
+        "nexus_status" => Ok(nexus_core::status::get_status(pool)),
+        "nexus_help" => Ok(NEXUS_HELP_TEXT.to_string()),
         _ => Err(format!("Unknown tool: {}", tool_name)),
     };
 

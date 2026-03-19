@@ -40,7 +40,100 @@ interface DocItem {
   title: string | null;
 }
 
-type Tab = "dashboard" | "search" | "projects" | "guide";
+type Tab = "dashboard" | "search" | "projects" | "guide" | "settings";
+
+interface McpStatus {
+  name: string;
+  installed: boolean;
+  registered: boolean;
+}
+
+function SettingsTab() {
+  const [mcpStatuses, setMcpStatuses] = useState<McpStatus[]>([]);
+  const [registering, setRegistering] = useState<string | null>(null);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const statuses = await invoke<McpStatus[]>("mcp_status");
+      setMcpStatuses(statuses);
+    } catch (e) {
+      console.error("Failed to load MCP status", e);
+    }
+  }, []);
+
+  useEffect(() => { loadStatus(); }, [loadStatus]);
+
+  const handleRegister = async (name: string) => {
+    setRegistering(name);
+    try {
+      await invoke("mcp_register", { name });
+      await loadStatus();
+    } catch (e) {
+      console.error("Failed to register MCP", e);
+    }
+    setRegistering(null);
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      <h2 className="text-lg font-bold mb-4" style={{ color: "var(--accent)" }}>설정</h2>
+
+      <div className="p-4 rounded-lg mb-4" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+        <h3 className="font-medium mb-3">MCP 서버 자동 등록</h3>
+        <p className="text-sm opacity-70 mb-4">
+          AI 도구에 Obsidian Nexus MCP 서버를 등록하면, 에이전트가 볼트 문서를 직접 검색하고 읽을 수 있습니다.
+        </p>
+
+        <div className="space-y-2">
+          {mcpStatuses.map((s) => (
+            <div key={s.name} className="flex items-center justify-between p-3 rounded"
+              style={{ background: "var(--bg-primary)", border: `1px solid var(--border)` }}>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium">{s.name}</span>
+                {!s.installed && (
+                  <span className="text-xs px-2 py-0.5 rounded opacity-50"
+                    style={{ background: "var(--bg-secondary)" }}>미설치</span>
+                )}
+                {s.installed && s.registered && (
+                  <span className="text-xs px-2 py-0.5 rounded"
+                    style={{ background: "#9ece6a22", color: "#9ece6a" }}>등록됨</span>
+                )}
+                {s.installed && !s.registered && (
+                  <span className="text-xs px-2 py-0.5 rounded"
+                    style={{ background: "#f7768e22", color: "#f7768e" }}>미등록</span>
+                )}
+              </div>
+              {s.installed && !s.registered && (
+                <button
+                  onClick={() => handleRegister(s.name)}
+                  disabled={registering === s.name}
+                  className="px-3 py-1 rounded text-xs cursor-pointer"
+                  style={{ background: "var(--accent)", color: "#1a1b26" }}>
+                  {registering === s.name ? "등록 중..." : "등록"}
+                </button>
+              )}
+            </div>
+          ))}
+          {mcpStatuses.length === 0 && (
+            <p className="text-sm opacity-50">MCP 대상 도구를 확인 중...</p>
+          )}
+        </div>
+      </div>
+
+      <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
+        <h3 className="font-medium mb-2">지원 도구</h3>
+        <ul className="text-sm opacity-70 space-y-1">
+          <li>• <strong>Claude Desktop</strong> — Anthropic 데스크톱 앱</li>
+          <li>• <strong>Claude Code</strong> — CLI 기반 코딩 에이전트</li>
+          <li>• <strong>Gemini CLI</strong> — Google Gemini CLI 도구</li>
+        </ul>
+        <p className="text-xs opacity-50 mt-3">
+          등록 후 해당 AI 도구를 재시작해야 MCP 서버가 인식됩니다.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 type SearchMode = "hybrid" | "keyword" | "vector";
 
@@ -204,6 +297,7 @@ function App() {
     search: "검색",
     projects: "프로젝트",
     guide: "가이드",
+    settings: "설정",
   };
 
   return (
@@ -212,7 +306,7 @@ function App() {
       <header className="px-6 py-4 flex items-center gap-4 border-b sticky top-0 z-50" style={{ borderColor: "var(--border)", background: "var(--bg-primary)" }}>
         <h1 className="text-xl font-bold" style={{ color: "var(--accent)" }}>Obsidian Nexus</h1>
         <nav className="flex gap-2 ml-auto">
-          {(["dashboard", "search", "projects", "guide"] as Tab[]).map((t) => (
+          {(["dashboard", "search", "projects", "guide", "settings"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => { setTab(t); setViewingDoc(null); }}
@@ -663,6 +757,8 @@ function App() {
         )}
 
         {/* ===== 가이드 ===== */}
+        {tab === "settings" && <SettingsTab />}
+
         {tab === "guide" && (
           <div className="max-w-2xl mx-auto">
             <h2 className="text-lg font-bold mb-4" style={{ color: "var(--accent)" }}>Obsidian Nexus 사용 가이드</h2>

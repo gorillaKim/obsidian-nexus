@@ -11,7 +11,7 @@ aliases:
 
 # MCP 도구 레퍼런스
 
-총 11개 도구 제공. AI 에이전트가 문서를 검색, 탐색, 분석하는 데 사용.
+총 12개 도구 제공. AI 에이전트가 문서를 검색, 탐색, 분석하는 데 사용.
 
 ## 검색
 
@@ -122,9 +122,47 @@ heading 기반 섹션 부분 읽기. 토큰 절약에 유용.
 |----------|------|------|
 | project | string | O |
 
+## 시스템 상태
+
+### nexus_status
+
+시스템 건강 상태 확인. Ollama 서버, 임베딩 모델, DB, 설정 상태를 JSON으로 반환.
+
+파라미터 없음.
+
+**반환 예시:**
+```json
+{
+  "ollama": {
+    "running": true,
+    "url": "http://localhost:11434",
+    "model": "nomic-embed-text",
+    "model_available": true
+  },
+  "database": {
+    "exists": true,
+    "path": "~/.nexus/nexus.db",
+    "schema_version": 5,
+    "project_count": 3,
+    "document_count": 142
+  },
+  "config": {
+    "exists": true,
+    "path": "~/.nexus/config.toml",
+    "embedding_provider": "ollama",
+    "embedding_model": "nomic-embed-text",
+    "embedding_dimensions": 768
+  },
+  "overall": "ready"
+}
+```
+
+`overall`: 모든 필수 항목 정상이면 `"ready"`, 아니면 `"not_ready"` (각 항목에 `error` 필드 포함).
+
 ## 에이전트 활용 패턴
 
 ```
+0. nexus_status → 시스템 상태 확인 (Ollama, DB 등)
 1. nexus_list_projects → 볼트 파악
 2. nexus_search("키워드") → 관련 문서 검색
 3. nexus_get_section(path, heading) → 필요한 섹션만 읽기

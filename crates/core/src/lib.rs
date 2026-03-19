@@ -6,6 +6,7 @@ pub mod index_engine;
 pub mod indexer;
 pub mod project;
 pub mod search;
+pub mod status;
 pub mod watcher;
 
 #[cfg(test)]

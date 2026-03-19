@@ -158,18 +158,89 @@ fn register_in_config(config_path: &std::path::Path, mcp_path: &str) -> bool {
     false
 }
 
-/// Register MCP server in both Claude Desktop and Claude Code configs
+/// AI tool config targets for MCP server registration.
+/// Only registers when the tool's config directory already exists (i.e. the tool is installed).
+/// Easily extensible: add a new entry to support additional AI tools.
+struct McpTarget {
+    name: &'static str,
+    /// Path relative to home directory
+    config_rel: &'static str,
+}
+
+const MCP_TARGETS: &[McpTarget] = &[
+    McpTarget { name: "Claude Desktop", config_rel: ".claude/claude_desktop_config.json" },
+    McpTarget { name: "Claude Code",    config_rel: ".claude/settings.json" },
+    McpTarget { name: "Gemini CLI",     config_rel: ".gemini/settings.json" },
+    // To add more tools, append here:
+    // McpTarget { name: "Cursor",      config_rel: ".cursor/mcp.json" },
+    // McpTarget { name: "Windsurf",    config_rel: ".codeium/windsurf/mcp_config.json" },
+];
+
+/// Register MCP server in all detected AI tool configs
 fn register_mcp_server() {
     let mcp_path = match find_mcp_binary() {
         Some(p) => p,
         None => return,
     };
 
-    if let Some(home) = dirs::home_dir() {
-        // Claude Desktop
-        register_in_config(&home.join(".claude/claude_desktop_config.json"), &mcp_path);
-        // Claude Code (settings.json)
-        register_in_config(&home.join(".claude/settings.json"), &mcp_path);
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+
+    for target in MCP_TARGETS {
+        let config_path = home.join(target.config_rel);
+        // Only register if the tool's config directory exists (tool is installed)
+        if let Some(parent) = config_path.parent() {
+            if parent.exists() {
+                if register_in_config(&config_path, &mcp_path) {
+                    eprintln!("MCP registered in {} ({})", target.name, config_path.display());
+                }
+            }
+        }
+    }
+}
+
+/// MCP status for each AI tool: name, installed (config dir exists), registered (nexus entry exists)
+#[derive(serde::Serialize)]
+struct McpStatus {
+    name: String,
+    installed: bool,
+    registered: bool,
+}
+
+#[tauri::command]
+fn mcp_status() -> Vec<McpStatus> {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return vec![],
+    };
+    MCP_TARGETS.iter().map(|t| {
+        let config_path = home.join(t.config_rel);
+        let installed = config_path.parent().map(|p| p.exists()).unwrap_or(false);
+        let registered = if installed && config_path.exists() {
+            std::fs::read_to_string(&config_path).ok()
+                .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                .and_then(|v| v.get("mcpServers")?.get("nexus").cloned())
+                .is_some()
+        } else {
+            false
+        };
+        McpStatus { name: t.name.to_string(), installed, registered }
+    }).collect()
+}
+
+#[tauri::command]
+fn mcp_register(name: String) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let mcp_path = find_mcp_binary().ok_or("MCP server binary not found")?;
+    let target = MCP_TARGETS.iter().find(|t| t.name == name)
+        .ok_or(format!("Unknown target: {}", name))?;
+    let config_path = home.join(target.config_rel);
+    if register_in_config(&config_path, &mcp_path) {
+        Ok(format!("Registered in {}", name))
+    } else {
+        Err(format!("Failed to register in {}", name))
     }
 }
 
@@ -368,6 +439,8 @@ fn main() {
             detect_vaults,
             auto_add_vaults,
             sync_vault_config,
+            mcp_status,
+            mcp_register,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
