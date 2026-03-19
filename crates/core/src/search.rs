@@ -101,7 +101,7 @@ pub fn fts_search(
 
     let mut stmt = conn.prepare(sql)?;
 
-    let mut results = if let Some(pid) = project_id {
+    let results = if let Some(pid) = project_id {
         let rows = stmt.query_map(params![safe_query, pid, limit as i64], map_result)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()?
     } else {
@@ -109,53 +109,85 @@ pub fn fts_search(
         rows.collect::<std::result::Result<Vec<_>, _>>()?
     };
 
-    // Alias fallback: if FTS5 results are insufficient, search document_aliases
-    if results.len() < limit {
-        let existing_doc_ids: std::collections::HashSet<String> =
-            results.iter().map(|r| r.document_id.clone()).collect();
-        let remaining = limit - results.len();
-        let alias_pattern = format!("%{}%", trimmed);
+    // Always resolve aliases and merge to front
+    let alias_results = resolve_alias_results(&conn, trimmed, project_id, limit);
+    let results = merge_alias_results(alias_results, results, limit);
 
-        let alias_sql = if project_id.is_some() {
-            "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
-                    substr(c.content, 1, 200) as snippet, 0.0 as score
-             FROM document_aliases da
-             JOIN documents d ON da.document_id = d.id
-             JOIN chunks c ON c.document_id = d.id
-             JOIN projects p ON d.project_id = p.id
-             WHERE da.alias LIKE ?1
-               AND d.project_id = ?2
-             GROUP BY c.document_id
-             LIMIT ?3"
-        } else {
-            "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
-                    substr(c.content, 1, 200) as snippet, 0.0 as score
-             FROM document_aliases da
-             JOIN documents d ON da.document_id = d.id
-             JOIN chunks c ON c.document_id = d.id
-             JOIN projects p ON d.project_id = p.id
-             WHERE da.alias LIKE ?1
-             GROUP BY c.document_id
-             LIMIT ?2"
-        };
+    Ok(results)
+}
 
-        let mut alias_stmt = conn.prepare(alias_sql)?;
-        let alias_results: Vec<SearchResult> = if let Some(pid) = project_id {
-            let rows = alias_stmt.query_map(params![alias_pattern, pid, remaining as i64], map_result)?;
-            rows.collect::<std::result::Result<Vec<_>, _>>()?
-        } else {
-            let rows = alias_stmt.query_map(params![alias_pattern, remaining as i64], map_result)?;
-            rows.collect::<std::result::Result<Vec<_>, _>>()?
-        };
+/// Resolve aliases: find documents whose alias matches the query.
+/// Returns chunks from matched documents, always executed regardless of other result counts.
+fn resolve_alias_results(
+    conn: &rusqlite::Connection,
+    query: &str,
+    project_id: Option<&str>,
+    limit: usize,
+) -> Vec<SearchResult> {
+    let pattern = format!("%{}%", query.trim());
+    let sql = if project_id.is_some() {
+        "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
+                substr(c.content, 1, 200) as snippet, 0.0 as score
+         FROM document_aliases da
+         JOIN documents d ON da.document_id = d.id
+         JOIN chunks c ON c.document_id = d.id
+         JOIN projects p ON d.project_id = p.id
+         WHERE da.alias LIKE ?1
+           AND d.project_id = ?2
+         GROUP BY c.document_id
+         LIMIT ?3"
+    } else {
+        "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
+                substr(c.content, 1, 200) as snippet, 0.0 as score
+         FROM document_aliases da
+         JOIN documents d ON da.document_id = d.id
+         JOIN chunks c ON c.document_id = d.id
+         JOIN projects p ON d.project_id = p.id
+         WHERE da.alias LIKE ?1
+         GROUP BY c.document_id
+         LIMIT ?2"
+    };
 
-        for r in alias_results {
-            if !existing_doc_ids.contains(&r.document_id) {
-                results.push(r);
-            }
+    let mut stmt = match conn.prepare(sql) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    let rows_result = if let Some(pid) = project_id {
+        stmt.query_map(params![pattern, pid, limit as i64], map_result)
+    } else {
+        stmt.query_map(params![pattern, limit as i64], map_result)
+    };
+
+    match rows_result {
+        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Err(_) => vec![],
+    }
+}
+
+/// Merge alias results into the front of search results, deduplicating by document_id
+fn merge_alias_results(alias_results: Vec<SearchResult>, main_results: Vec<SearchResult>, limit: usize) -> Vec<SearchResult> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut merged = Vec::with_capacity(limit);
+
+    // Alias matches first
+    for r in alias_results {
+        if seen.insert(r.document_id.clone()) {
+            merged.push(r);
         }
     }
 
-    Ok(results)
+    // Then main results
+    for r in main_results {
+        if merged.len() >= limit {
+            break;
+        }
+        if seen.insert(r.document_id.clone()) {
+            merged.push(r);
+        }
+    }
+
+    merged
 }
 
 fn map_result(row: &rusqlite::Row) -> rusqlite::Result<SearchResult> {
@@ -421,7 +453,14 @@ pub fn hybrid_search(
     merged.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     merged.truncate(limit);
 
-    Ok(merged.into_iter().map(|(score, mut r)| { r.score = score; r }).collect())
+    let main_results: Vec<SearchResult> = merged.into_iter().map(|(score, mut r)| { r.score = score; r }).collect();
+
+    // Always resolve aliases and merge to front
+    let conn = pool.get()?;
+    let alias_results = resolve_alias_results(&conn, query.trim(), project_id, limit);
+    let results = merge_alias_results(alias_results, main_results, limit);
+
+    Ok(results)
 }
 
 /// Enrich search results with metadata (tags, backlink_count, view_count, last_modified)
