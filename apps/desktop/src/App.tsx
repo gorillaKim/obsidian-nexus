@@ -54,6 +54,7 @@ function App() {
   const [searching, setSearching] = useState(false);
   const [indexing, setIndexing] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
+  const [syncing, setSyncing] = useState<Set<string>>(new Set());
   const [viewingDoc, setViewingDoc] = useState<{ projectId: string; filePath: string; content: string } | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [projectDocs, setProjectDocs] = useState<Map<string, DocItem[]>>(new Map());
@@ -127,6 +128,15 @@ function App() {
       await loadProjects();
     } catch (e) { console.error(e); }
     setAdding(false);
+  };
+
+  const handleSync = async (projectId: string) => {
+    setSyncing((prev) => new Set(prev).add(projectId));
+    try {
+      await invoke("sync_vault_config", { projectId });
+      await loadProjects();
+    } catch (e) { console.error(e); }
+    setSyncing((prev) => { const n = new Set(prev); n.delete(projectId); return n; });
   };
 
   const handleRemoveProject = async (projectId: string) => {
@@ -597,6 +607,11 @@ function App() {
                         className="px-3 py-1 rounded text-sm"
                         style={{ background: "var(--accent)", color: "#1a1b26", opacity: indexing.has(p.id) ? 0.5 : 1 }}>
                         {indexing.has(p.id) ? "인덱싱 중..." : "인덱싱"}
+                      </button>
+                      <button onClick={() => handleSync(p.id)} disabled={syncing.has(p.id)}
+                        className="px-3 py-1 rounded text-sm"
+                        style={{ border: "1px solid var(--accent)", color: "var(--accent)", opacity: syncing.has(p.id) ? 0.5 : 1 }}>
+                        {syncing.has(p.id) ? "동기화 중..." : "동기화"}
                       </button>
                       <button onClick={() => handleRemoveProject(p.id)}
                         className="px-3 py-1 rounded text-sm opacity-50 hover:opacity-100"
