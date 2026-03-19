@@ -116,8 +116,14 @@ function App() {
       if (!selected) return;
       setAdding(true);
       const folderPath = selected as string;
-      const folderName = folderPath.split("/").pop() || "untitled";
-      await invoke("add_project", { name: folderName, path: folderPath });
+
+      // Auto-detect Obsidian vaults (.obsidian folder) and register them
+      const result = await invoke<{ added: number; projects: unknown[] }>("auto_add_vaults", { path: folderPath });
+      if (result.added === 0) {
+        // No vaults found — fall back to registering the folder directly
+        const folderName = folderPath.split("/").pop() || "untitled";
+        await invoke("add_project", { name: folderName, path: folderPath });
+      }
       await loadProjects();
     } catch (e) { console.error(e); }
     setAdding(false);
