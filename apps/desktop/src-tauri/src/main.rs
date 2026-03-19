@@ -160,6 +160,16 @@ fn register_mcp_server() {
     }
 }
 
+/// Simple URL encoding for Obsidian URI scheme
+fn urlencoding(s: &str) -> String {
+    s.bytes().map(|b| match b {
+        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'/' => {
+            String::from(b as char)
+        }
+        _ => format!("%{:02X}", b),
+    }).collect()
+}
+
 /// Open a file: try Obsidian deeplink first, fallback to system default editor
 #[tauri::command]
 fn open_file(
@@ -182,17 +192,30 @@ fn open_file(
             .unwrap_or(false);
 
     if obsidian_installed {
-        // Use `open -a Obsidian <file_path>` — this opens the file directly
-        // Obsidian will auto-detect the vault from the file's parent directory
+        // Use Obsidian URI scheme to open the specific file in the vault
+        // obsidian://open?vault=VAULT_NAME&file=FILE_PATH (without .md extension)
+        let vault_name = proj.vault_name.as_deref().unwrap_or(&proj.name);
+        let file_without_ext = if file_path.ends_with(".md") {
+            &file_path[..file_path.len() - 3]
+        } else {
+            &file_path
+        };
+        let uri = format!(
+            "obsidian://open?vault={}&file={}",
+            urlencoding(&vault_name),
+            urlencoding(&file_without_ext),
+        );
         let status = std::process::Command::new("open")
-            .args(["-a", "Obsidian", abs_path.to_str().unwrap_or("")])
+            .arg(&uri)
             .spawn();
         match status {
-            Ok(_) => Ok(serde_json::json!({ "opened_with": "obsidian", "path": abs_path.to_string_lossy() })),
+            Ok(_) => Ok(serde_json::json!({ "opened_with": "obsidian_uri", "uri": uri, "path": abs_path.to_string_lossy() })),
             Err(_) => {
-                // Fallback to system default
-                let _ = std::process::Command::new("open").arg(&abs_path).spawn();
-                Ok(serde_json::json!({ "opened_with": "system", "path": abs_path.to_string_lossy() }))
+                // Fallback to open -a Obsidian
+                let _ = std::process::Command::new("open")
+                    .args(["-a", "Obsidian", abs_path.to_str().unwrap_or("")])
+                    .spawn();
+                Ok(serde_json::json!({ "opened_with": "obsidian_fallback", "path": abs_path.to_string_lossy() }))
             }
         }
     } else {
