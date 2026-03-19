@@ -62,6 +62,7 @@ function App() {
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState(false);
+  const [tagFilter, setTagFilter] = useState("");
   const [hybridWeight, setHybridWeight] = useState(0.7);
   const [minVectorScore, setMinVectorScore] = useState(0.65);
 
@@ -89,6 +90,9 @@ function App() {
     setSearching(true);
     setViewingDoc(null);
     try {
+      const parsedTags = tagFilter.trim()
+        ? tagFilter.split(",").map((t) => t.trim()).filter((t) => t)
+        : undefined;
       const res = await invoke<SearchResult[]>("search_documents", {
         query,
         projectId: selectedProject || null,
@@ -96,6 +100,7 @@ function App() {
         mode: searchMode,
         hybridWeight: searchMode === "hybrid" ? hybridWeight : undefined,
         minVectorScore: searchMode !== "keyword" ? minVectorScore : undefined,
+        tags: parsedTags,
       });
       setResults(res);
     } catch (e) { console.error(e); }
@@ -342,11 +347,24 @@ function App() {
                   })}
                 </div>
 
+                <div style={{ width: 1, height: 16, background: "var(--border)" }} />
+
+                {/* 태그 필터 */}
+                <div className="flex items-center gap-1">
+                  <span className="text-xs opacity-50">태그:</span>
+                  <input type="text" value={tagFilter}
+                    onChange={(e) => setTagFilter(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                    placeholder="rust, api"
+                    className="px-2 py-0.5 rounded text-xs w-24"
+                    style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: `1px solid var(--border)` }} />
+                </div>
+
                 {results.length > 0 && (
                   <>
                     <div style={{ width: 1, height: 16, background: "var(--border)" }} />
                     <span className="text-xs opacity-50">{results.length}건 검색됨</span>
-                    <button onClick={() => setResults([])} className="text-xs opacity-40 hover:opacity-100">초기화</button>
+                    <button onClick={() => setResults([])} className="text-xs opacity-40 hover:opacity-100 cursor-pointer">초기화</button>
                   </>
                 )}
               </div>

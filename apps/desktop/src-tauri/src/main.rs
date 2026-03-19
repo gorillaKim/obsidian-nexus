@@ -24,6 +24,7 @@ fn search_documents(
     mode: Option<String>,
     hybrid_weight: Option<f64>,
     min_vector_score: Option<f64>,
+    tags: Option<Vec<String>>,
 ) -> Result<Vec<SearchResult>, String> {
     let resolved_pid = if let Some(ref pid) = project_id {
         let proj = nexus_core::project::get_project(&state.pool, pid).map_err(|e| e.to_string())?;
@@ -42,18 +43,30 @@ fn search_documents(
 
     let limit = limit.unwrap_or(20);
     let mode = mode.as_deref().unwrap_or("hybrid");
+    let use_popularity = project_id.is_some();
 
-    match mode {
+    let mut results = match mode {
         "keyword" => nexus_core::search::fts_search(
             &state.pool, &query, resolved_pid.as_deref(), limit,
-        ).map_err(|e| e.to_string()),
+        ).map_err(|e| e.to_string())?,
         "vector" => nexus_core::search::vector_search(
             &state.pool, &query, resolved_pid.as_deref(), limit, &config,
-        ).map_err(|e| e.to_string()),
+        ).map_err(|e| e.to_string())?,
         _ => nexus_core::search::hybrid_search(
             &state.pool, &query, resolved_pid.as_deref(), limit, &config,
-        ).map_err(|e| e.to_string()),
+        ).map_err(|e| e.to_string())?,
+    };
+
+    // Enrich with metadata + apply tag filter
+    nexus_core::search::enrich_results(&state.pool, &mut results, use_popularity)
+        .map_err(|e| e.to_string())?;
+
+    if let Some(ref tag_list) = tags {
+        let tag_refs: Vec<&str> = tag_list.iter().map(|s| s.as_str()).collect();
+        nexus_core::search::filter_by_tags(&mut results, &tag_refs);
     }
+
+    Ok(results)
 }
 
 #[tauri::command]

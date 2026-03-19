@@ -27,6 +27,7 @@ aliases:
 | mode | string | - | hybrid | hybrid, keyword, vector |
 | enrich | boolean | - | true | 메타데이터 포함 |
 | use_popularity | boolean | - | 프로젝트 필터 시 true | 인기도 부스트 |
+| tags | string[] | - | - | 태그 필터 (OR 조건, 예: ["rust", "api"]) |
 
 ## 문서 읽기
 
