@@ -261,9 +261,9 @@ function App() {
                         {p.last_indexed_at ? `${new Date(p.last_indexed_at).toLocaleDateString("ko-KR")} 인덱싱됨` : "미인덱싱"}
                       </span>
                       <button onClick={() => handleIndex(p.id)} disabled={indexing.has(p.id)}
-                        className="px-3 py-1 rounded text-xs"
+                        className="px-3 py-1 rounded text-xs cursor-pointer disabled:cursor-wait"
                         style={{ background: "var(--accent)", color: "#1a1b26", opacity: indexing.has(p.id) ? 0.5 : 1 }}>
-                        {indexing.has(p.id) ? "인덱싱 중..." : "인덱싱"}
+                        {indexing.has(p.id) ? "⟳ 인덱싱 중..." : "인덱싱"}
                       </button>
                     </div>
                   </div>
@@ -604,17 +604,17 @@ function App() {
                     <h3 className="font-medium">{p.name}</h3>
                     <div className="flex gap-2">
                       <button onClick={() => handleIndex(p.id)} disabled={indexing.has(p.id)}
-                        className="px-3 py-1 rounded text-sm"
+                        className="px-3 py-1 rounded text-sm cursor-pointer disabled:cursor-wait"
                         style={{ background: "var(--accent)", color: "#1a1b26", opacity: indexing.has(p.id) ? 0.5 : 1 }}>
-                        {indexing.has(p.id) ? "인덱싱 중..." : "인덱싱"}
+                        {indexing.has(p.id) ? "⟳ 인덱싱 중..." : "인덱싱"}
                       </button>
                       <button onClick={() => handleSync(p.id)} disabled={syncing.has(p.id)}
-                        className="px-3 py-1 rounded text-sm"
+                        className="px-3 py-1 rounded text-sm cursor-pointer disabled:cursor-wait"
                         style={{ border: "1px solid var(--accent)", color: "var(--accent)", opacity: syncing.has(p.id) ? 0.5 : 1 }}>
-                        {syncing.has(p.id) ? "동기화 중..." : "동기화"}
+                        {syncing.has(p.id) ? "⟳ 동기화 중..." : "동기화"}
                       </button>
                       <button onClick={() => handleRemoveProject(p.id)}
-                        className="px-3 py-1 rounded text-sm opacity-50 hover:opacity-100"
+                        className="px-3 py-1 rounded text-sm cursor-pointer opacity-50 hover:opacity-100"
                         style={{ border: "1px solid var(--border)", color: "var(--text-secondary)" }}>
                         삭제
                       </button>
