@@ -160,6 +160,23 @@ pub struct ProjectStats {
     pub pending_count: i64,
 }
 
+/// Read vault display name from on-config.json, falling back to folder name
+fn read_vault_name(vault_path: &std::path::Path) -> String {
+    let config_path = vault_path.join("on-config.json");
+    if let Ok(content) = std::fs::read_to_string(&config_path) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(name) = val.get("name").and_then(|n| n.as_str()) {
+                if !name.is_empty() {
+                    return name.to_string();
+                }
+            }
+        }
+    }
+    vault_path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "vault".to_string())
+}
+
 /// Detect Obsidian vaults under a directory (folders containing .obsidian/)
 /// Returns list of (vault_name, vault_path) pairs
 pub fn detect_vaults(root_path: &str) -> Result<Vec<(String, String)>> {
@@ -172,13 +189,11 @@ pub fn detect_vaults(root_path: &str) -> Result<Vec<(String, String)>> {
 
     // Check if root itself is a vault
     if root.join(".obsidian").is_dir() {
-        let name = root.file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "vault".to_string());
+        let name = read_vault_name(root);
         let abs = std::fs::canonicalize(root)
             .map_err(|_| NexusError::PathNotFound(root_path.to_string()))?;
         vaults.push((name, abs.to_string_lossy().to_string()));
-        return Ok(vaults); // Don't recurse into sub-vaults
+        return Ok(vaults);
     }
 
     // Recurse into subdirectories (max depth 3 to avoid deep traversal)
@@ -200,7 +215,8 @@ pub fn detect_vaults(root_path: &str) -> Result<Vec<(String, String)>> {
             }
             if path.join(".obsidian").is_dir() {
                 let abs = std::fs::canonicalize(&path).unwrap_or(path.clone());
-                vaults.push((name, abs.to_string_lossy().to_string()));
+                let vault_name = read_vault_name(&path);
+                vaults.push((vault_name, abs.to_string_lossy().to_string()));
                 // Don't recurse into a vault's subdirectories
             } else {
                 scan(&path, vaults, depth + 1);
