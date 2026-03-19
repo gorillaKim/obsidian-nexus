@@ -11,7 +11,7 @@ aliases:
 
 # MCP 도구 레퍼런스
 
-총 10개 도구 제공. AI 에이전트가 문서를 검색, 탐색, 분석하는 데 사용.
+총 11개 도구 제공. AI 에이전트가 문서를 검색, 탐색, 분석하는 데 사용.
 
 ## 검색
 
@@ -113,6 +113,14 @@ heading 기반 섹션 부분 읽기. 토큰 절약에 유용.
 | project | string | O | - |
 | full | boolean | - | false |
 
+### nexus_sync_config
+
+볼트 루트의 `on-config.json`을 읽어 프로젝트 설정을 동기화. 이름 변경 후 호출.
+
+| 파라미터 | 타입 | 필수 |
+|----------|------|------|
+| project | string | O |
+
 ## 에이전트 활용 패턴
 
 ```
@@ -121,6 +129,7 @@ heading 기반 섹션 부분 읽기. 토큰 절약에 유용.
 3. nexus_get_section(path, heading) → 필요한 섹션만 읽기
 4. nexus_get_backlinks(path) → 관련 문서 그래프 탐색
 5. nexus_resolve_alias("별칭") → 별칭으로 문서 접근
+6. nexus_sync_config(project) → on-config.json 변경 후 동기화
 ```
 
 ## 관련 문서
