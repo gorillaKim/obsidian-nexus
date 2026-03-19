@@ -25,6 +25,7 @@ fn search_documents(
     hybrid_weight: Option<f64>,
     min_vector_score: Option<f64>,
     tags: Option<Vec<String>>,
+    tag_match_all: Option<bool>,
 ) -> Result<Vec<SearchResult>, String> {
     let resolved_pid = if let Some(ref pid) = project_id {
         let proj = nexus_core::project::get_project(&state.pool, pid).map_err(|e| e.to_string())?;
@@ -63,7 +64,7 @@ fn search_documents(
 
     if let Some(ref tag_list) = tags {
         let tag_refs: Vec<&str> = tag_list.iter().map(|s| s.as_str()).collect();
-        nexus_core::search::filter_by_tags(&mut results, &tag_refs);
+        nexus_core::search::filter_by_tags(&mut results, &tag_refs, tag_match_all.unwrap_or(false));
     }
 
     Ok(results)

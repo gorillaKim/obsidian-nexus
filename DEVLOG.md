@@ -4,6 +4,22 @@
 
 ---
 
+## 검색 개선 (2026-03-19)
+
+### 18. Alias Fallback 검색
+- **문제:** "데이터독"으로 검색 시 결과 0건. FTS5는 chunk 본문만 검색하므로 한글 alias로는 영문 본문 매칭 불가
+- **원인:** `document_aliases` 테이블에 alias가 저장되어 있지만 `fts_search()`에서 참조하지 않음
+- **해결:** `fts_search()`에 alias fallback 추가 — FTS5 결과가 limit 미만일 때 `document_aliases` LIKE 검색으로 보충
+- **교훈:** FTS5 토크나이저(unicode61)는 크로스 언어 매칭에 한계. alias는 이를 보완하는 핵심 메커니즘
+
+### 19. 태그 필터 AND/OR 모드
+- **기능:** `filter_by_tags()`에 `match_all` 파라미터 추가
+- **OR(기본):** 태그 중 하나라도 매칭 → 결과 포함
+- **AND:** 모든 태그가 매칭되는 결과만 포함
+- **적용:** MCP(`tag_match_all` 파라미터), Desktop(`tag_match_all` IPC 파라미터)
+
+---
+
 ## Phase 1: 스캐폴딩 + 파일 시스템 (2026-03-18)
 
 ### 1. Rust 툴체인 미설치

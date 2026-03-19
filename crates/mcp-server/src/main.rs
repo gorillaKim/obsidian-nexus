@@ -121,7 +121,8 @@ fn handle_tools_list(id: &Value) -> Value {
                             "mode": { "type": "string", "description": "Search mode: hybrid (default), keyword, vector", "default": "hybrid" },
                             "enrich": { "type": "boolean", "description": "Include metadata (tags, backlink_count, view_count, last_modified) in results (default: true)", "default": true },
                             "use_popularity": { "type": "boolean", "description": "Boost results by popularity. Default: true if project specified, false otherwise" },
-                            "tags": { "type": "array", "items": { "type": "string" }, "description": "Filter results by tags (optional, matches ANY tag)" }
+                            "tags": { "type": "array", "items": { "type": "string" }, "description": "Filter results by tags (optional)" },
+                            "tag_match_all": { "type": "boolean", "description": "If true, require ALL tags to match (AND). Default false (OR).", "default": false }
                         },
                         "required": ["query"]
                     }
@@ -348,7 +349,8 @@ fn tool_search(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::resu
     if let Some(tags_val) = args.get("tags").and_then(|t| t.as_array()) {
         let tags: Vec<&str> = tags_val.iter().filter_map(|v| v.as_str()).collect();
         if !tags.is_empty() {
-            nexus_core::search::filter_by_tags(&mut results, &tags);
+            let match_all = args.get("tag_match_all").and_then(|v| v.as_bool()).unwrap_or(false);
+            nexus_core::search::filter_by_tags(&mut results, &tags, match_all);
         }
     }
 
