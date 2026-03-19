@@ -330,8 +330,10 @@ fn strip_code_blocks(body: &str) -> String {
 
 /// Extract [[wiki links]] from markdown body, skipping code blocks
 fn extract_wiki_links(body: &str) -> Vec<WikiLink> {
+    use std::sync::LazyLock;
+    static RE: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"\[\[([^\]]+)\]\]").unwrap());
     let clean = strip_code_blocks(body);
-    let re = regex::Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
+    let re = &*RE;
     let mut links = Vec::new();
 
     for cap in re.captures_iter(&clean) {
@@ -353,8 +355,10 @@ fn extract_wiki_links(body: &str) -> Vec<WikiLink> {
 
 /// Extract #inline_tags from markdown body, skipping code blocks
 fn extract_inline_tags(body: &str) -> Vec<String> {
+    use std::sync::LazyLock;
+    static RE: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?:^|\s)#([a-zA-Z가-힣\u{3131}-\u{318E}][a-zA-Z0-9가-힣\u{3131}-\u{318E}_/-]*)").unwrap());
     let clean = strip_code_blocks(body);
-    let re = regex::Regex::new(r"(?:^|\s)#([a-zA-Z가-힣\u{3131}-\u{318E}][a-zA-Z0-9가-힣\u{3131}-\u{318E}_/-]*)").unwrap();
+    let re = &*RE;
     let mut tags = Vec::new();
 
     for cap in re.captures_iter(&clean) {

@@ -72,6 +72,25 @@ pub fn index_project(pool: &DbPool, project_id: &str, full: bool) -> Result<Inde
         }
     }
 
+    // Clean up ghost documents (in DB but deleted from disk)
+    {
+        let conn = pool.get()?;
+        let mut ghost_stmt = conn.prepare(
+            "SELECT id, file_path FROM documents WHERE project_id = ?1"
+        )?;
+        let all_docs: Vec<(String, String)> = ghost_stmt.query_map(params![proj.id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        drop(ghost_stmt);
+        for (doc_id, doc_path) in &all_docs {
+            let abs = vault_path.join(doc_path);
+            if !abs.exists() {
+                conn.execute("DELETE FROM documents WHERE id = ?1", params![doc_id])?;
+                tracing::info!("Removed ghost document: {}", doc_path);
+            }
+        }
+    }
+
     // Update project last_indexed_at only if no errors occurred
     if report.errors == 0 {
         let conn = pool.get()?;

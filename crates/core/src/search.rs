@@ -54,9 +54,9 @@ pub fn fts_search(
             }
         }
 
-        // Short query: add prefix matching
+        // Short query: add prefix matching (escaped inside quotes)
         if trimmed.chars().count() <= 3 {
-            parts.push(format!("{}*", escaped));
+            parts.push(format!("\"{}\"*", escaped));
         }
 
         parts.join(" OR ")
@@ -166,7 +166,17 @@ pub fn list_documents(
 /// Get document content by reading the file from disk
 pub fn get_document_content(pool: &DbPool, project_id: &str, file_path: &str) -> Result<String> {
     let project = crate::project::get_project(pool, project_id)?;
-    let full_path = std::path::Path::new(&project.path).join(file_path);
+    let vault_path = std::fs::canonicalize(&project.path)
+        .map_err(|_| crate::error::NexusError::PathNotFound(project.path.clone()))?;
+    let full_path = vault_path.join(file_path);
+    let full_path = std::fs::canonicalize(&full_path)
+        .map_err(|_| crate::error::NexusError::DocumentNotFound(file_path.to_string()))?;
+    // Path traversal guard
+    if !full_path.starts_with(&vault_path) {
+        return Err(crate::error::NexusError::DocumentNotFound(
+            "Path traversal detected".to_string()
+        ));
+    }
     let content = std::fs::read_to_string(&full_path)?;
     Ok(content)
 }
@@ -363,109 +373,103 @@ pub fn enrich_results(
     results: &mut Vec<SearchResult>,
     use_popularity: bool,
 ) -> Result<()> {
+    if results.is_empty() { return Ok(()); }
     let conn = pool.get()?;
 
+    // Collect unique document IDs for batch queries
+    let mut doc_ids: Vec<String> = results.iter().map(|r| r.document_id.clone()).collect();
+    doc_ids.sort();
+    doc_ids.dedup();
+
+    // Batch: tags per document
+    let mut doc_tags: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut tag_stmt = conn.prepare_cached(
+        "SELECT dt.document_id, t.name FROM tags t
+         JOIN document_tags dt ON t.id = dt.tag_id"
+    )?;
+    let tag_rows = tag_stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+    for (did, tag) in tag_rows {
+        doc_tags.entry(did).or_default().push(tag);
+    }
+
+    // Batch: backlink counts
+    let mut backlink_counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut bl_stmt = conn.prepare_cached(
+        "SELECT target_doc_id, COUNT(*) FROM wiki_links WHERE target_doc_id IS NOT NULL GROUP BY target_doc_id"
+    )?;
+    let bl_rows = bl_stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+    for (did, count) in bl_rows {
+        backlink_counts.insert(did, count);
+    }
+
+    // Batch: view counts
+    let mut view_counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut vc_stmt = conn.prepare_cached(
+        "SELECT document_id, COUNT(*) FROM document_views GROUP BY document_id"
+    )?;
+    let vc_rows = vc_stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+    for (did, count) in vc_rows {
+        view_counts.insert(did, count);
+    }
+
+    // Batch: document metadata (title, last_modified)
+    let mut doc_meta: std::collections::HashMap<String, (Option<String>, Option<String>)> = std::collections::HashMap::new();
+    let mut meta_stmt = conn.prepare_cached(
+        "SELECT id, title, last_modified FROM documents"
+    )?;
+    let meta_rows = meta_stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?))
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+    for (did, title, lm) in meta_rows {
+        doc_meta.insert(did, (title, lm));
+    }
+
+    // Apply metadata to results + reranking
     for r in results.iter_mut() {
-        // Tags
-        let mut tag_stmt = conn.prepare_cached(
-            "SELECT t.name FROM tags t
-             JOIN document_tags dt ON t.id = dt.tag_id
-             WHERE dt.document_id = ?1"
-        )?;
-        let tags: Vec<String> = tag_stmt.query_map(params![r.document_id], |row| row.get(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        r.tags = Some(tags);
+        r.tags = Some(doc_tags.get(&r.document_id).cloned().unwrap_or_default());
+        r.backlink_count = Some(*backlink_counts.get(&r.document_id).unwrap_or(&0));
+        r.view_count = Some(*view_counts.get(&r.document_id).unwrap_or(&0));
+        if let Some((_, ref lm)) = doc_meta.get(&r.document_id) {
+            r.last_modified = lm.clone();
+        }
 
-        // Backlink count
-        let bl_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM wiki_links WHERE target_doc_id = ?1",
-            params![r.document_id],
-            |row| row.get(0),
-        ).unwrap_or(0);
-        r.backlink_count = Some(bl_count);
+        let mut boost = 0.0_f64;
 
-        // View count
-        let vc: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM document_views WHERE document_id = ?1",
-            params![r.document_id],
-            |row| row.get(0),
-        ).unwrap_or(0);
-        r.view_count = Some(vc);
-
-        // Last modified
-        let lm: Option<String> = conn.query_row(
-            "SELECT last_modified FROM documents WHERE id = ?1",
-            params![r.document_id],
-            |row| row.get(0),
-        ).ok();
-        r.last_modified = lm;
-    }
-
-    // Metadata-based reranking: boost score based on backlinks + popularity + title match
-    if !results.is_empty() {
-        // Get document titles for title-match boost
-        let mut doc_titles: std::collections::HashMap<String, Option<String>> = std::collections::HashMap::new();
-        for r in results.iter() {
-            if !doc_titles.contains_key(&r.document_id) {
-                let title: Option<String> = conn.query_row(
-                    "SELECT title FROM documents WHERE id = ?1",
-                    params![r.document_id],
-                    |row| row.get(0),
-                ).ok().flatten();
-                doc_titles.insert(r.document_id.clone(), title);
+        // Title match boost: if heading_path top-level matches document title
+        if let Some((Some(ref title), _)) = doc_meta.get(&r.document_id) {
+            if let Some(ref heading) = r.heading_path {
+                let first_heading = heading.split(" > ").next().unwrap_or("");
+                if first_heading == title.as_str() {
+                    boost += 0.10;
+                }
             }
         }
 
-        for r in results.iter_mut() {
-            let mut boost = 0.0_f64;
-
-            // Title/heading match boost: +25% if file title or heading contains search terms
-            if let Some(Some(title)) = doc_titles.get(&r.document_id) {
-                let title_lower = title.to_lowercase();
-                // Check heading_path too
-                let heading_lower = r.heading_path.as_deref().unwrap_or("").to_lowercase();
-                let file_stem = r.file_path.split('/').last().unwrap_or("").replace(".md", "").to_lowercase();
-
-                // Boost if title, heading, or filename matches any search term
-                let has_title_match = r.snippet.contains("<b>") && (
-                    title_lower.contains(&title_lower) || // always true, check below
-                    heading_lower.split(" > ").any(|part| part.contains("<b>")) ||
-                    file_stem.replace('-', " ").contains(&title_lower)
-                );
-                // Simple heuristic: if the document title appears in heading_path first segment
-                if let Some(heading) = &r.heading_path {
-                    let first_heading = heading.split(" > ").next().unwrap_or("");
-                    if first_heading == title.as_str() {
-                        boost += 0.10; // Document-level match
-                    }
-                }
-                let _ = has_title_match; // suppress unused
+        // Heading depth boost: top-level sections get priority
+        if let Some(ref heading) = r.heading_path {
+            if !heading.contains(" > ") {
+                boost += 0.05;
             }
-
-            // Heading path depth boost: top-level headings get slight priority
-            if let Some(heading) = &r.heading_path {
-                let depth = heading.matches(" > ").count();
-                if depth == 0 {
-                    boost += 0.05; // Top-level section
-                }
-            }
-
-            if use_popularity {
-                // Backlink boost: each backlink adds 2% (max 20%)
-                let bl = r.backlink_count.unwrap_or(0) as f64;
-                boost += (bl * 0.02).min(0.20);
-                // Popularity boost: log scale (max 15%)
-                let vc = r.view_count.unwrap_or(0) as f64;
-                if vc > 0.0 {
-                    boost += ((vc + 1.0).ln() * 0.03).min(0.15);
-                }
-            }
-
-            r.score *= 1.0 + boost;
         }
-        // Re-sort after boosting
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+        if use_popularity {
+            let bl = r.backlink_count.unwrap_or(0) as f64;
+            boost += (bl * 0.02).min(0.20);
+            let vc = r.view_count.unwrap_or(0) as f64;
+            if vc > 0.0 {
+                boost += ((vc + 1.0).ln() * 0.03).min(0.15);
+            }
+        }
+
+        r.score *= 1.0 + boost;
     }
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
     Ok(())
 }

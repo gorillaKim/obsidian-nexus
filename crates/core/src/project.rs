@@ -94,13 +94,6 @@ pub fn remove_project(pool: &DbPool, id_or_name: &str) -> Result<()> {
     let project = get_project(pool, id_or_name)?;
     let conn = pool.get()?;
     conn.execute("DELETE FROM projects WHERE id = ?1", params![project.id])?;
-
-    // Clean up LanceDB directory
-    let lance_dir = crate::config::Config::lance_dir(&project.id);
-    if lance_dir.exists() {
-        let _ = std::fs::remove_dir_all(&lance_dir);
-    }
-
     Ok(())
 }
 

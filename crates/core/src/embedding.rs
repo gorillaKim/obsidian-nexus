@@ -8,11 +8,24 @@ struct OllamaEmbeddingResponse {
     embedding: Vec<f32>,
 }
 
+/// Shared HTTP client for Ollama requests (connection pooling)
+fn http_client() -> &'static reqwest::blocking::Client {
+    use std::sync::LazyLock;
+    static CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(|| {
+        reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .pool_max_idle_per_host(16)
+            .build()
+            .expect("Failed to create HTTP client")
+    });
+    &CLIENT
+}
+
 /// Generate embedding vector for text using Ollama
 pub fn embed_text(config: &Config, text: &str) -> Result<Vec<f32>> {
     let url = format!("{}/api/embeddings", config.embedding.ollama_url);
 
-    let client = reqwest::blocking::Client::new();
+    let client = http_client();
     let resp = client
         .post(&url)
         .json(&serde_json::json!({
