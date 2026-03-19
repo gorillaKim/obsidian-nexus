@@ -12,6 +12,9 @@ use std::fs;
 use tempfile::TempDir;
 
 fn test_pool() -> DbPool {
+    // Register sqlite-vec extension
+    nexus_core::db::sqlite::register_sqlite_vec_for_test();
+
     let manager = SqliteConnectionManager::memory()
         .with_init(|conn| {
             conn.execute_batch(
@@ -21,9 +24,17 @@ fn test_pool() -> DbPool {
             )
         });
     let pool = Pool::builder().max_size(1).build(manager).unwrap();
-    let mut conn = pool.get().unwrap();
+    let conn = pool.get().unwrap();
     conn.execute_batch(include_str!("../migrations/V1__initial.sql")).unwrap();
     conn.execute_batch(include_str!("../migrations/V2__embeddings.sql")).unwrap();
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
+            chunk_id TEXT PRIMARY KEY,
+            embedding float[768]
+        );"
+    ).unwrap();
+    conn.execute_batch(include_str!("../migrations/V4__links.sql")).unwrap();
+    conn.execute_batch(include_str!("../migrations/V5__search_enhancements.sql")).unwrap();
     pool
 }
 

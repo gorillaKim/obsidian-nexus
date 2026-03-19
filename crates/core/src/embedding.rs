@@ -60,6 +60,15 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     dot / (norm_a * norm_b)
 }
 
+/// Normalize embedding vector to unit length (L2 norm = 1).
+/// This makes L2 distance equivalent to cosine distance for sqlite-vec.
+pub fn normalize(v: &mut [f32]) {
+    let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        v.iter_mut().for_each(|x| *x /= norm);
+    }
+}
+
 /// Serialize embedding to bytes (for SQLite BLOB storage)
 pub fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
     embedding

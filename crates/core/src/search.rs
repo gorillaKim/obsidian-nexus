@@ -13,6 +13,14 @@ pub struct SearchResult {
     pub heading_path: Option<String>,
     pub snippet: String,
     pub score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backlink_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<String>,
 }
 
 /// FTS5 keyword search
@@ -29,8 +37,15 @@ pub fn fts_search(
         return Ok(vec![]);
     }
 
-    // Sanitize FTS5 query: wrap in quotes to prevent operator injection
-    let safe_query = format!("\"{}\"", query.replace('"', "\"\""));
+    // Sanitize FTS5 query: short queries use prefix matching, longer ones use phrase matching
+    let trimmed = query.trim();
+    let safe_query = if trimmed.chars().count() <= 3 {
+        // Short query: use prefix matching for better recall (e.g. "앱" → "앱" OR 앱*)
+        let escaped = trimmed.replace('"', "\"\"");
+        format!("\"{}\" OR {}*", escaped, escaped)
+    } else {
+        format!("\"{}\"", query.replace('"', "\"\""))
+    };
 
     let sql = if project_id.is_some() {
         "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
@@ -79,6 +94,10 @@ fn map_result(row: &rusqlite::Row) -> rusqlite::Result<SearchResult> {
         heading_path: row.get(4)?,
         snippet: row.get(5)?,
         score: row.get::<_, f64>(6).unwrap_or(0.0),
+        tags: None,
+        backlink_count: None,
+        view_count: None,
+        last_modified: None,
     })
 }
 
@@ -181,7 +200,7 @@ pub struct DocumentMeta {
     pub last_indexed: Option<String>,
 }
 
-/// Vector similarity search using Ollama embeddings
+/// Vector similarity search using sqlite-vec KNN
 pub fn vector_search(
     pool: &DbPool,
     query: &str,
@@ -189,63 +208,85 @@ pub fn vector_search(
     limit: usize,
     config: &crate::config::Config,
 ) -> Result<Vec<SearchResult>> {
-    // Generate query embedding
-    let query_embedding = crate::embedding::embed_text(config, query)?;
+    // Generate and normalize query embedding
+    let mut query_embedding = crate::embedding::embed_text(config, query)?;
+    crate::embedding::normalize(&mut query_embedding);
+    let query_bytes = crate::embedding::embedding_to_bytes(&query_embedding);
 
     let conn = pool.get()?;
 
-    // Fetch all chunk embeddings (with optional project filter)
-    let sql = if project_id.is_some() {
-        "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path, c.content, ce.embedding
-         FROM chunk_embeddings ce
-         JOIN chunks c ON ce.chunk_id = c.id
-         JOIN documents d ON c.document_id = d.id
-         JOIN projects p ON d.project_id = p.id
-         WHERE d.project_id = ?1"
-    } else {
-        "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path, c.content, ce.embedding
-         FROM chunk_embeddings ce
-         JOIN chunks c ON ce.chunk_id = c.id
-         JOIN documents d ON c.document_id = d.id
-         JOIN projects p ON d.project_id = p.id"
-    };
+    // sqlite-vec KNN: fetch top-K*2 candidates, then filter by project if needed
+    let fetch_limit = if project_id.is_some() { limit * 3 } else { limit };
+
+    let sql = "SELECT v.chunk_id, v.distance, c.document_id, d.file_path, p.name,
+                      c.heading_path, c.content, d.project_id
+               FROM vec_chunks v
+               JOIN chunks c ON v.chunk_id = c.id
+               JOIN documents d ON c.document_id = d.id
+               JOIN projects p ON d.project_id = p.id
+               WHERE v.embedding MATCH ?1
+                 AND k = ?2
+               ORDER BY v.distance";
 
     let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map(params![query_bytes, fetch_limit as i64], |row| {
+        Ok((
+            row.get::<_, String>(0)?,   // chunk_id
+            row.get::<_, f64>(1)?,      // distance
+            row.get::<_, String>(2)?,   // document_id
+            row.get::<_, String>(3)?,   // file_path
+            row.get::<_, String>(4)?,   // project_name
+            row.get::<_, Option<String>>(5)?, // heading_path
+            row.get::<_, String>(6)?,   // content
+            row.get::<_, String>(7)?,   // project_id
+        ))
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
 
-    let rows: Vec<(String, String, String, String, Option<String>, String, Vec<u8>)> = if let Some(pid) = project_id {
-        stmt.query_map(params![pid], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))
-        })?.collect::<std::result::Result<Vec<_>, _>>()?
-    } else {
-        stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))
-        })?.collect::<std::result::Result<Vec<_>, _>>()?
-    };
+    // Convert L2 distance to similarity score (normalized vectors: similarity ≈ 1 - distance²/2)
+    let min_score = config.search.min_vector_score;
+    let mut results: Vec<SearchResult> = Vec::new();
 
-    // Compute cosine similarity and rank
-    let mut scored: Vec<(f32, SearchResult)> = rows.into_iter().map(|(chunk_id, doc_id, file_path, proj_name, heading, content, emb_bytes)| {
-        let emb = crate::embedding::bytes_to_embedding(&emb_bytes);
-        let score = crate::embedding::cosine_similarity(&query_embedding, &emb);
-        let snippet = if content.len() > 200 { format!("{}...", &content[..content.char_indices().nth(200).map_or(content.len(), |(i,_)| i)]) } else { content };
-        (score, SearchResult {
+    for (chunk_id, distance, doc_id, file_path, proj_name, heading, content, pid) in rows {
+        // Filter by project if specified
+        if let Some(filter_pid) = project_id {
+            if pid != filter_pid {
+                continue;
+            }
+        }
+
+        // Convert L2 distance to cosine similarity for normalized vectors
+        let similarity = 1.0 - (distance * distance) / 2.0;
+
+        if similarity < min_score {
+            continue;
+        }
+
+        let snippet = if content.len() > 200 {
+            format!("{}...", &content[..content.char_indices().nth(200).map_or(content.len(), |(i,_)| i)])
+        } else {
+            content
+        };
+
+        results.push(SearchResult {
             chunk_id,
             document_id: doc_id,
             file_path,
             project_name: proj_name,
             heading_path: heading,
             snippet,
-            score: score as f64,
-        })
-    }).collect();
+            score: similarity,
+            tags: None,
+            backlink_count: None,
+            view_count: None,
+            last_modified: None,
+        });
 
-    // Filter by minimum similarity threshold
-    let min_score = config.search.min_vector_score as f32;
-    scored.retain(|(s, _)| *s >= min_score);
+        if results.len() >= limit {
+            break;
+        }
+    }
 
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    scored.truncate(limit);
-
-    Ok(scored.into_iter().map(|(_, r)| r).collect())
+    Ok(results)
 }
 
 /// Hybrid search: combine FTS5 keyword + vector similarity
@@ -256,7 +297,15 @@ pub fn hybrid_search(
     limit: usize,
     config: &crate::config::Config,
 ) -> Result<Vec<SearchResult>> {
-    let weight = config.search.hybrid_weight; // 0.0 = keyword only, 1.0 = vector only
+    // Dynamic weight: short queries lean toward keyword, long queries use configured weight
+    let char_count = query.trim().chars().count();
+    let weight = if char_count <= 2 {
+        config.search.hybrid_weight * 0.3 // heavily keyword-biased
+    } else if char_count <= 4 {
+        config.search.hybrid_weight * 0.6 // moderately keyword-biased
+    } else {
+        config.search.hybrid_weight // use configured weight as-is
+    };
 
     // Get keyword results
     let keyword_results = fts_search(pool, query, project_id, limit * 2)?;
@@ -290,6 +339,205 @@ pub fn hybrid_search(
     merged.truncate(limit);
 
     Ok(merged.into_iter().map(|(score, mut r)| { r.score = score; r }).collect())
+}
+
+/// Enrich search results with metadata (tags, backlink_count, view_count, last_modified)
+/// and optionally apply metadata-based reranking
+pub fn enrich_results(
+    pool: &DbPool,
+    results: &mut Vec<SearchResult>,
+    use_popularity: bool,
+) -> Result<()> {
+    let conn = pool.get()?;
+
+    for r in results.iter_mut() {
+        // Tags
+        let mut tag_stmt = conn.prepare_cached(
+            "SELECT t.name FROM tags t
+             JOIN document_tags dt ON t.id = dt.tag_id
+             WHERE dt.document_id = ?1"
+        )?;
+        let tags: Vec<String> = tag_stmt.query_map(params![r.document_id], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        r.tags = Some(tags);
+
+        // Backlink count
+        let bl_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM wiki_links WHERE target_doc_id = ?1",
+            params![r.document_id],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        r.backlink_count = Some(bl_count);
+
+        // View count
+        let vc: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM document_views WHERE document_id = ?1",
+            params![r.document_id],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        r.view_count = Some(vc);
+
+        // Last modified
+        let lm: Option<String> = conn.query_row(
+            "SELECT last_modified FROM documents WHERE id = ?1",
+            params![r.document_id],
+            |row| row.get(0),
+        ).ok();
+        r.last_modified = lm;
+    }
+
+    // Metadata-based reranking: boost score based on backlinks + popularity + freshness
+    if use_popularity && !results.is_empty() {
+        let max_score = results.iter().map(|r| r.score).fold(0.0_f64, f64::max);
+        if max_score > 0.0 {
+            for r in results.iter_mut() {
+                let mut boost = 0.0_f64;
+                // Backlink boost: each backlink adds 2% (max 20%)
+                let bl = r.backlink_count.unwrap_or(0) as f64;
+                boost += (bl * 0.02).min(0.20);
+                // Popularity boost: log scale (max 15%)
+                let vc = r.view_count.unwrap_or(0) as f64;
+                if vc > 0.0 {
+                    boost += ((vc + 1.0).ln() * 0.03).min(0.15);
+                }
+                r.score *= 1.0 + boost;
+            }
+            // Re-sort after boosting
+            results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        }
+    }
+
+    Ok(())
+}
+
+/// Record a document view for popularity tracking
+pub fn record_view(pool: &DbPool, document_id: &str) -> Result<()> {
+    let conn = pool.get()?;
+    conn.execute(
+        "INSERT INTO document_views (document_id) VALUES (?1)",
+        params![document_id],
+    )?;
+    Ok(())
+}
+
+/// Get a specific section of a document by heading path
+pub fn get_section(pool: &DbPool, project_id: &str, file_path: &str, heading: &str) -> Result<String> {
+    let content = get_document_content(pool, project_id, file_path)?;
+    let mut in_section = false;
+    let mut section_level = 0usize;
+    let mut result = String::new();
+
+    for line in content.lines() {
+        if line.starts_with('#') {
+            let level = line.chars().take_while(|c| *c == '#').count();
+            let title = line.trim_start_matches('#').trim();
+            if title.eq_ignore_ascii_case(heading) || line.contains(heading) {
+                in_section = true;
+                section_level = level;
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
+            if in_section && level <= section_level {
+                break; // Hit same or higher level heading, stop
+            }
+        }
+        if in_section {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+
+    if result.is_empty() {
+        Err(crate::error::NexusError::DocumentNotFound(
+            format!("Section '{}' not found in {}", heading, file_path)
+        ))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Backlink result
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BacklinkResult {
+    pub source_file_path: String,
+    pub source_title: Option<String>,
+    pub display_text: Option<String>,
+}
+
+/// Forward link result
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LinkResult {
+    pub target_path: String,
+    pub display_text: Option<String>,
+    pub resolved: bool,
+}
+
+/// Get documents that link TO this document (backlinks)
+pub fn get_backlinks(pool: &DbPool, project_id: &str, file_path: &str) -> Result<Vec<BacklinkResult>> {
+    let conn = pool.get()?;
+    let mut stmt = conn.prepare(
+        "SELECT d.file_path, d.title, wl.display_text
+         FROM wiki_links wl
+         JOIN documents d ON wl.source_doc_id = d.id
+         JOIN documents target_d ON wl.target_doc_id = target_d.id
+         WHERE target_d.project_id = ?1 AND target_d.file_path = ?2"
+    )?;
+    let results = stmt.query_map(params![project_id, file_path], |row| {
+        Ok(BacklinkResult {
+            source_file_path: row.get(0)?,
+            source_title: row.get(1)?,
+            display_text: row.get(2)?,
+        })
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(results)
+}
+
+/// Get documents that this document links TO (forward links)
+pub fn get_forward_links(pool: &DbPool, project_id: &str, file_path: &str) -> Result<Vec<LinkResult>> {
+    let conn = pool.get()?;
+    let mut stmt = conn.prepare(
+        "SELECT wl.target_path, wl.display_text, wl.target_doc_id
+         FROM wiki_links wl
+         JOIN documents d ON wl.source_doc_id = d.id
+         WHERE d.project_id = ?1 AND d.file_path = ?2"
+    )?;
+    let results = stmt.query_map(params![project_id, file_path], |row| {
+        let target_doc_id: Option<String> = row.get(2)?;
+        Ok(LinkResult {
+            target_path: row.get(0)?,
+            display_text: row.get(1)?,
+            resolved: target_doc_id.is_some(),
+        })
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(results)
+}
+
+/// Resolve a document by alias
+pub fn resolve_by_alias(pool: &DbPool, project_id: &str, alias: &str) -> Result<Option<DocumentInfo>> {
+    let conn = pool.get()?;
+    let result = conn.query_row(
+        "SELECT d.id, d.file_path, d.title, d.indexing_status, d.last_indexed
+         FROM document_aliases da
+         JOIN documents d ON da.document_id = d.id
+         WHERE d.project_id = ?1 AND da.alias = ?2
+         LIMIT 1",
+        params![project_id, alias],
+        |row| {
+            Ok(DocumentInfo {
+                id: row.get(0)?,
+                file_path: row.get(1)?,
+                title: row.get(2)?,
+                indexing_status: row.get(3)?,
+                last_indexed: row.get(4)?,
+            })
+        },
+    );
+    match result {
+        Ok(info) => Ok(Some(info)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[cfg(test)]

@@ -99,9 +99,13 @@ fn index_single_file(
     let parsed = indexer::parse_markdown(content, config.indexer.chunk_size, config.indexer.chunk_overlap);
 
     // Generate embeddings outside transaction (network call, avoid holding lock)
-    let embeddings: Vec<Option<Vec<u8>>> = parsed.chunks.iter().map(|chunk| {
+    // Normalize embeddings for sqlite-vec (L2 distance ≈ cosine distance when normalized)
+    let embeddings: Vec<Option<Vec<f32>>> = parsed.chunks.iter().map(|chunk| {
         match crate::embedding::embed_text(config, &chunk.content) {
-            Ok(vec) => Some(crate::embedding::embedding_to_bytes(&vec)),
+            Ok(mut vec) => {
+                crate::embedding::normalize(&mut vec);
+                Some(vec)
+            }
             Err(e) => {
                 tracing::warn!("Embedding failed for chunk: {}", e);
                 None
@@ -120,7 +124,9 @@ fn index_single_file(
     )?;
 
     // 2. Delete old embeddings + chunks (FTS5 triggers handle fts cleanup)
-    tx.execute("DELETE FROM chunk_embeddings WHERE chunk_id IN (SELECT id FROM chunks WHERE document_id = ?1)", params![doc_id])?;
+    tx.execute("DELETE FROM vec_chunks WHERE chunk_id IN (SELECT id FROM chunks WHERE document_id = ?1)", params![doc_id])?;
+    // Also clean legacy table if it exists
+    let _ = tx.execute("DELETE FROM chunk_embeddings WHERE chunk_id IN (SELECT id FROM chunks WHERE document_id = ?1)", params![doc_id]);
     tx.execute("DELETE FROM chunks WHERE document_id = ?1", params![doc_id])?;
 
     // 3. Delete old tags
@@ -143,9 +149,10 @@ fn index_single_file(
             ],
         )?;
 
-        if let Some(Some(emb_bytes)) = embeddings.get(i) {
+        if let Some(Some(emb_vec)) = embeddings.get(i) {
+            let emb_bytes = crate::embedding::embedding_to_bytes(emb_vec);
             tx.execute(
-                "INSERT INTO chunk_embeddings (chunk_id, embedding) VALUES (?1, ?2)",
+                "INSERT INTO vec_chunks (chunk_id, embedding) VALUES (?1, ?2)",
                 params![chunk_id, emb_bytes],
             )?;
         }
@@ -164,7 +171,39 @@ fn index_single_file(
         )?;
     }
 
-    // 6. Update document metadata
+    // 6. Delete old wiki links and aliases
+    tx.execute("DELETE FROM wiki_links WHERE source_doc_id = ?1", params![doc_id])?;
+    tx.execute("DELETE FROM document_aliases WHERE document_id = ?1", params![doc_id])?;
+
+    // 7. Insert wiki links (resolve target_doc_id within same project)
+    for link in &parsed.wiki_links {
+        // Try to resolve: match target against file_path (with or without .md)
+        let target_with_md = if link.target.ends_with(".md") {
+            link.target.clone()
+        } else {
+            format!("{}.md", link.target)
+        };
+        let target_doc_id: Option<String> = tx.query_row(
+            "SELECT id FROM documents WHERE project_id = ?1 AND (file_path = ?2 OR file_path = ?3)",
+            params![project_id, link.target, target_with_md],
+            |row| row.get(0),
+        ).ok();
+
+        tx.execute(
+            "INSERT INTO wiki_links (source_doc_id, target_path, display_text, target_doc_id) VALUES (?1, ?2, ?3, ?4)",
+            params![doc_id, link.target, link.display, target_doc_id],
+        )?;
+    }
+
+    // 8. Insert aliases
+    for alias in &parsed.aliases {
+        tx.execute(
+            "INSERT INTO document_aliases (document_id, alias) VALUES (?1, ?2)",
+            params![doc_id, alias],
+        )?;
+    }
+
+    // 9. Update document metadata
     let frontmatter_json = parsed.frontmatter
         .map(|v| serde_json::to_string(&v).unwrap_or_default());
 

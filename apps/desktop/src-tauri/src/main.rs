@@ -21,6 +21,9 @@ fn search_documents(
     query: String,
     project_id: Option<String>,
     limit: Option<usize>,
+    mode: Option<String>,
+    hybrid_weight: Option<f64>,
+    min_vector_score: Option<f64>,
 ) -> Result<Vec<SearchResult>, String> {
     let resolved_pid = if let Some(ref pid) = project_id {
         let proj = nexus_core::project::get_project(&state.pool, pid).map_err(|e| e.to_string())?;
@@ -29,15 +32,28 @@ fn search_documents(
         None
     };
 
-    let config = nexus_core::Config::load().unwrap_or_default();
-    nexus_core::search::hybrid_search(
-        &state.pool,
-        &query,
-        resolved_pid.as_deref(),
-        limit.unwrap_or(20),
-        &config,
-    )
-    .map_err(|e| e.to_string())
+    let mut config = nexus_core::Config::load().unwrap_or_default();
+    if let Some(w) = hybrid_weight {
+        config.search.hybrid_weight = w;
+    }
+    if let Some(s) = min_vector_score {
+        config.search.min_vector_score = s;
+    }
+
+    let limit = limit.unwrap_or(20);
+    let mode = mode.as_deref().unwrap_or("hybrid");
+
+    match mode {
+        "keyword" => nexus_core::search::fts_search(
+            &state.pool, &query, resolved_pid.as_deref(), limit,
+        ).map_err(|e| e.to_string()),
+        "vector" => nexus_core::search::vector_search(
+            &state.pool, &query, resolved_pid.as_deref(), limit, &config,
+        ).map_err(|e| e.to_string()),
+        _ => nexus_core::search::hybrid_search(
+            &state.pool, &query, resolved_pid.as_deref(), limit, &config,
+        ).map_err(|e| e.to_string()),
+    }
 }
 
 #[tauri::command]

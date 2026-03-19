@@ -83,7 +83,7 @@ fn default_exclude_patterns() -> Vec<String> {
 }
 fn default_limit() -> usize { 20 }
 fn default_hybrid_weight() -> f64 { 0.7 }
-fn default_min_vector_score() -> f64 { 0.42 }
+fn default_min_vector_score() -> f64 { 0.65 }
 fn default_debounce_ms() -> u64 { 500 }
 fn default_log_level() -> String { "info".into() }
 

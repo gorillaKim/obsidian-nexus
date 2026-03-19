@@ -9,6 +9,14 @@ pub struct ParsedDocument {
     pub chunks: Vec<Chunk>,
     pub tags: Vec<String>,
     pub content_hash: String,
+    pub wiki_links: Vec<WikiLink>,
+    pub aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WikiLink {
+    pub target: String,
+    pub display: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,7 +33,7 @@ pub fn parse_markdown(content: &str, chunk_size: usize, chunk_overlap: usize) ->
     let content_hash = compute_hash(content);
 
     // 1. Extract frontmatter
-    let (frontmatter, body, tags) = extract_frontmatter(content);
+    let (frontmatter, body, mut tags) = extract_frontmatter(content);
 
     // 2. Extract title from first H1
     let title = extract_title(&body);
@@ -36,12 +44,30 @@ pub fn parse_markdown(content: &str, chunk_size: usize, chunk_overlap: usize) ->
     // 4. Chunk sections that exceed chunk_size
     let chunks = chunk_sections(sections, chunk_size, chunk_overlap);
 
+    // 5. Extract wiki links from body (using pulldown-cmark AST to skip code blocks)
+    let wiki_links = extract_wiki_links(&body);
+
+    // 6. Extract inline tags from body and merge with frontmatter tags
+    let inline_tags = extract_inline_tags(&body);
+    for t in inline_tags {
+        if !tags.contains(&t) {
+            tags.push(t);
+        }
+    }
+
+    // 7. Extract aliases from frontmatter
+    let aliases = frontmatter.as_ref()
+        .map(|fm| extract_aliases(fm))
+        .unwrap_or_default();
+
     ParsedDocument {
         title,
         frontmatter,
         chunks,
         tags,
         content_hash,
+        wiki_links,
+        aliases,
     }
 }
 
@@ -282,6 +308,90 @@ fn split_sentences(text: &str) -> Vec<String> {
     sentences
 }
 
+/// Remove code blocks from markdown body (fenced ``` and indented)
+fn strip_code_blocks(body: &str) -> String {
+    let mut result = String::new();
+    let mut in_fence = false;
+    for line in body.lines() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            result.push('\n');
+            continue;
+        }
+        if in_fence {
+            result.push('\n');
+        } else {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+    result
+}
+
+/// Extract [[wiki links]] from markdown body, skipping code blocks
+fn extract_wiki_links(body: &str) -> Vec<WikiLink> {
+    let clean = strip_code_blocks(body);
+    let re = regex::Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
+    let mut links = Vec::new();
+
+    for cap in re.captures_iter(&clean) {
+        let inner = cap[1].to_string();
+        if let Some((target, display)) = inner.split_once('|') {
+            links.push(WikiLink {
+                target: target.trim().to_string(),
+                display: Some(display.trim().to_string()),
+            });
+        } else {
+            links.push(WikiLink {
+                target: inner.trim().to_string(),
+                display: None,
+            });
+        }
+    }
+    links
+}
+
+/// Extract #inline_tags from markdown body, skipping code blocks
+fn extract_inline_tags(body: &str) -> Vec<String> {
+    let clean = strip_code_blocks(body);
+    let re = regex::Regex::new(r"(?:^|\s)#([a-zA-Z가-힣\u{3131}-\u{318E}][a-zA-Z0-9가-힣\u{3131}-\u{318E}_/-]*)").unwrap();
+    let mut tags = Vec::new();
+
+    for cap in re.captures_iter(&clean) {
+        let tag = cap[1].to_string();
+        if !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
+    tags
+}
+
+/// Extract aliases from frontmatter value
+fn extract_aliases(fm: &serde_json::Value) -> Vec<String> {
+    let mut aliases = Vec::new();
+    if let Some(val) = fm.get("aliases") {
+        match val {
+            serde_json::Value::Array(arr) => {
+                for item in arr {
+                    if let Some(s) = item.as_str() {
+                        aliases.push(s.to_string());
+                    }
+                }
+            }
+            serde_json::Value::String(s) => {
+                for a in s.split(',') {
+                    let trimmed = a.trim();
+                    if !trimmed.is_empty() {
+                        aliases.push(trimmed.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    aliases
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,5 +449,66 @@ mod tests {
         let hash3 = compute_hash("world");
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
+    }
+
+    #[test]
+    fn test_extract_wiki_links() {
+        let body = "See [[note1]] and [[folder/note2|My Note]] for details.";
+        let links = extract_wiki_links(body);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].target, "note1");
+        assert!(links[0].display.is_none());
+        assert_eq!(links[1].target, "folder/note2");
+        assert_eq!(links[1].display.as_deref(), Some("My Note"));
+    }
+
+    #[test]
+    fn test_wiki_links_skip_code_blocks() {
+        let body = "Normal [[link]]\n\n```\n[[not-a-link]]\n```\n\nAnother [[real-link]].";
+        let links = extract_wiki_links(body);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].target, "link");
+        assert_eq!(links[1].target, "real-link");
+    }
+
+    #[test]
+    fn test_extract_inline_tags() {
+        let body = "This is #rust and #한국어 content.\n\n```\n#not-a-tag\n```";
+        let tags = extract_inline_tags(body);
+        assert!(tags.contains(&"rust".to_string()));
+        assert!(tags.contains(&"한국어".to_string()));
+        assert!(!tags.contains(&"not-a-tag".to_string()));
+    }
+
+    #[test]
+    fn test_extract_aliases() {
+        let fm: serde_json::Value = serde_json::json!({
+            "title": "Test",
+            "aliases": ["AI", "인공지능", "Artificial Intelligence"]
+        });
+        let aliases = extract_aliases(&fm);
+        assert_eq!(aliases.len(), 3);
+        assert_eq!(aliases[0], "AI");
+        assert_eq!(aliases[1], "인공지능");
+    }
+
+    #[test]
+    fn test_extract_aliases_string() {
+        let fm: serde_json::Value = serde_json::json!({
+            "aliases": "AI, 인공지능"
+        });
+        let aliases = extract_aliases(&fm);
+        assert_eq!(aliases.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_markdown_with_links_and_tags() {
+        let content = "---\ntitle: Test\ntags:\n  - frontmatter-tag\naliases:\n  - MyAlias\n---\n\n# Test\n\nSee [[other-note]] and #inline-tag here.";
+        let parsed = parse_markdown(content, 512, 50);
+        assert_eq!(parsed.wiki_links.len(), 1);
+        assert_eq!(parsed.wiki_links[0].target, "other-note");
+        assert!(parsed.tags.contains(&"frontmatter-tag".to_string()));
+        assert!(parsed.tags.contains(&"inline-tag".to_string()));
+        assert_eq!(parsed.aliases, vec!["MyAlias"]);
     }
 }

@@ -85,7 +85,10 @@ fn handle_tools_list(id: &Value) -> Value {
                         "properties": {
                             "query": { "type": "string", "description": "Search query" },
                             "project": { "type": "string", "description": "Project name or ID (optional, searches all if omitted)" },
-                            "limit": { "type": "integer", "description": "Max results (default: 20)", "default": 20 }
+                            "limit": { "type": "integer", "description": "Max results (default: 20)", "default": 20 },
+                            "mode": { "type": "string", "description": "Search mode: hybrid (default), keyword, vector", "default": "hybrid" },
+                            "enrich": { "type": "boolean", "description": "Include metadata (tags, backlink_count, view_count, last_modified) in results (default: true)", "default": true },
+                            "use_popularity": { "type": "boolean", "description": "Boost results by popularity. Default: true if project specified, false otherwise" }
                         },
                         "required": ["query"]
                     }
@@ -142,6 +145,55 @@ fn handle_tools_list(id: &Value) -> Value {
                         },
                         "required": ["project"]
                     }
+                },
+                {
+                    "name": "nexus_get_section",
+                    "description": "Get a specific section of a document by heading name",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Project name or ID" },
+                            "path": { "type": "string", "description": "File path relative to vault root" },
+                            "heading": { "type": "string", "description": "Heading text to extract (e.g. 'Introduction')" }
+                        },
+                        "required": ["project", "path", "heading"]
+                    }
+                },
+                {
+                    "name": "nexus_get_backlinks",
+                    "description": "Get documents that link to this document (backlinks)",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Project name or ID" },
+                            "path": { "type": "string", "description": "File path relative to vault root" }
+                        },
+                        "required": ["project", "path"]
+                    }
+                },
+                {
+                    "name": "nexus_get_links",
+                    "description": "Get documents that this document links to (forward links)",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Project name or ID" },
+                            "path": { "type": "string", "description": "File path relative to vault root" }
+                        },
+                        "required": ["project", "path"]
+                    }
+                },
+                {
+                    "name": "nexus_resolve_alias",
+                    "description": "Find a document by its alias",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Project name or ID" },
+                            "alias": { "type": "string", "description": "Alias to look up" }
+                        },
+                        "required": ["project", "alias"]
+                    }
                 }
             ]
         }
@@ -159,6 +211,10 @@ fn handle_tools_call(id: &Value, params: &Value, pool: &nexus_core::db::sqlite::
         "nexus_get_metadata" => tool_get_metadata(&args, pool),
         "nexus_list_documents" => tool_list_documents(&args, pool),
         "nexus_index_project" => tool_index_project(&args, pool),
+        "nexus_get_section" => tool_get_section(&args, pool),
+        "nexus_get_backlinks" => tool_get_backlinks(&args, pool),
+        "nexus_get_links" => tool_get_links(&args, pool),
+        "nexus_resolve_alias" => tool_resolve_alias(&args, pool),
         _ => Err(format!("Unknown tool: {}", tool_name)),
     };
 
@@ -185,6 +241,11 @@ fn tool_search(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::resu
     let query = args.get("query").and_then(|q| q.as_str()).ok_or("Missing 'query'")?;
     let project = args.get("project").and_then(|p| p.as_str());
     let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(20) as usize;
+    let mode = args.get("mode").and_then(|m| m.as_str()).unwrap_or("hybrid");
+    let enrich = args.get("enrich").and_then(|e| e.as_bool()).unwrap_or(true);
+    // Default use_popularity: true if project filter, false otherwise
+    let use_popularity = args.get("use_popularity").and_then(|u| u.as_bool())
+        .unwrap_or(project.is_some());
 
     let resolved_pid = if let Some(p) = project {
         let proj = nexus_core::project::get_project(pool, p).map_err(|e| e.to_string())?;
@@ -193,8 +254,21 @@ fn tool_search(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::resu
         None
     };
 
-    let results = nexus_core::search::fts_search(pool, query, resolved_pid.as_deref(), limit)
-        .map_err(|e| e.to_string())?;
+    let config = nexus_core::Config::load().unwrap_or_default();
+    let mut results = match mode {
+        "keyword" => nexus_core::search::fts_search(pool, query, resolved_pid.as_deref(), limit)
+            .map_err(|e| e.to_string())?,
+        "vector" => nexus_core::search::vector_search(pool, query, resolved_pid.as_deref(), limit, &config)
+            .map_err(|e| e.to_string())?,
+        _ => nexus_core::search::hybrid_search(pool, query, resolved_pid.as_deref(), limit, &config)
+            .map_err(|e| e.to_string())?,
+    };
+
+    if enrich {
+        nexus_core::search::enrich_results(pool, &mut results, use_popularity)
+            .map_err(|e| e.to_string())?;
+    }
+
     serde_json::to_string_pretty(&results).map_err(|e| e.to_string())
 }
 
@@ -207,7 +281,21 @@ fn tool_get_document(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std
     let project = args.get("project").and_then(|p| p.as_str()).ok_or("Missing 'project'")?;
     let path = args.get("path").and_then(|p| p.as_str()).ok_or("Missing 'path'")?;
     let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
+
+    // Record view for popularity tracking
+    if let Ok(meta) = nexus_core::search::get_document_meta(pool, &proj.id, path) {
+        let _ = nexus_core::search::record_view(pool, &meta.id);
+    }
+
     nexus_core::search::get_document_content(pool, &proj.id, path).map_err(|e| e.to_string())
+}
+
+fn tool_get_section(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
+    let project = args.get("project").and_then(|p| p.as_str()).ok_or("Missing 'project'")?;
+    let path = args.get("path").and_then(|p| p.as_str()).ok_or("Missing 'path'")?;
+    let heading = args.get("heading").and_then(|h| h.as_str()).ok_or("Missing 'heading'")?;
+    let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
+    nexus_core::search::get_section(pool, &proj.id, path, heading).map_err(|e| e.to_string())
 }
 
 fn tool_get_metadata(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
@@ -232,4 +320,28 @@ fn tool_index_project(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> st
     let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
     let report = nexus_core::index_engine::index_project(pool, &proj.id, full).map_err(|e| e.to_string())?;
     serde_json::to_string_pretty(&report).map_err(|e| e.to_string())
+}
+
+fn tool_get_backlinks(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
+    let project = args.get("project").and_then(|p| p.as_str()).ok_or("Missing 'project'")?;
+    let path = args.get("path").and_then(|p| p.as_str()).ok_or("Missing 'path'")?;
+    let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
+    let backlinks = nexus_core::search::get_backlinks(pool, &proj.id, path).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&backlinks).map_err(|e| e.to_string())
+}
+
+fn tool_get_links(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
+    let project = args.get("project").and_then(|p| p.as_str()).ok_or("Missing 'project'")?;
+    let path = args.get("path").and_then(|p| p.as_str()).ok_or("Missing 'path'")?;
+    let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
+    let links = nexus_core::search::get_forward_links(pool, &proj.id, path).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&links).map_err(|e| e.to_string())
+}
+
+fn tool_resolve_alias(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
+    let project = args.get("project").and_then(|p| p.as_str()).ok_or("Missing 'project'")?;
+    let alias = args.get("alias").and_then(|a| a.as_str()).ok_or("Missing 'alias'")?;
+    let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
+    let result = nexus_core::search::resolve_by_alias(pool, &proj.id, alias).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
 }

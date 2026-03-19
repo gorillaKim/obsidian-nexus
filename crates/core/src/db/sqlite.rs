@@ -6,10 +6,31 @@ use crate::error::Result;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
+/// Register sqlite-vec as auto extension (called once before any connections)
+fn register_sqlite_vec() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        unsafe {
+            rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+                sqlite_vec::sqlite3_vec_init as *const (),
+            )));
+        }
+    });
+}
+
+/// Public wrapper for tests to register sqlite-vec
+pub fn register_sqlite_vec_for_test() {
+    register_sqlite_vec();
+}
+
 /// Create a connection pool to the SQLite database
 pub fn create_pool() -> Result<DbPool> {
     Config::ensure_dirs()?;
     let db_path = Config::db_path();
+
+    // Register sqlite-vec globally before creating any connections
+    register_sqlite_vec();
 
     // Use with_init to apply PRAGMAs to EVERY connection in the pool
     let manager = SqliteConnectionManager::file(&db_path)
@@ -60,6 +81,36 @@ pub fn run_migrations(pool: &DbPool) -> Result<()> {
         let tx = conn.transaction()?;
         tx.execute_batch(include_str!("../../migrations/V2__embeddings.sql"))?;
         tx.execute("INSERT INTO schema_version (version) VALUES (?1)", params![2])?;
+        tx.commit()?;
+    }
+
+    if version < 3 {
+        tracing::info!("Running migration V3: sqlite-vec");
+        // sqlite-vec extension must be loaded before creating vec0 virtual table
+        let config = Config::load().unwrap_or_default();
+        let dimensions = config.embedding.dimensions;
+        conn.execute_batch(&format!(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
+                chunk_id TEXT PRIMARY KEY,
+                embedding float[{dimensions}]
+            );"
+        ))?;
+        conn.execute("INSERT INTO schema_version (version) VALUES (?1)", params![3])?;
+    }
+
+    if version < 4 {
+        tracing::info!("Running migration V4: wiki links and aliases");
+        let tx = conn.transaction()?;
+        tx.execute_batch(include_str!("../../migrations/V4__links.sql"))?;
+        tx.execute("INSERT INTO schema_version (version) VALUES (?1)", params![4])?;
+        tx.commit()?;
+    }
+
+    if version < 5 {
+        tracing::info!("Running migration V5: search enhancements");
+        let tx = conn.transaction()?;
+        tx.execute_batch(include_str!("../../migrations/V5__search_enhancements.sql"))?;
+        tx.execute("INSERT INTO schema_version (version) VALUES (?1)", params![5])?;
         tx.commit()?;
     }
 
