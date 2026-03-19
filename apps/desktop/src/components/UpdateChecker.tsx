@@ -35,11 +35,16 @@ export function UpdateChecker({ variant }: UpdateCheckerProps) {
     setInstalling(true);
     setProgress("다운로드 중...");
     try {
+      let totalSize = 0;
+      let downloaded = 0;
       await update.downloadAndInstall((event) => {
         if (event.event === "Started" && event.data.contentLength) {
-          setProgress(`다운로드 중... (${(event.data.contentLength / 1024 / 1024).toFixed(1)} MB)`);
+          totalSize = event.data.contentLength;
+          setProgress(`다운로드 중... 0%`);
         } else if (event.event === "Progress") {
-          setProgress(`다운로드 중... ${((event.data.chunkLength || 0) / 1024).toFixed(0)} KB`);
+          downloaded += event.data.chunkLength || 0;
+          const pct = totalSize > 0 ? Math.round((downloaded / totalSize) * 100) : 0;
+          setProgress(`다운로드 중... ${pct}%`);
         } else if (event.event === "Finished") {
           setProgress("설치 중...");
         }

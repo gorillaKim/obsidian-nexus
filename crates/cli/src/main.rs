@@ -80,6 +80,9 @@ enum Commands {
         /// Only check, don't install
         #[arg(long)]
         check: bool,
+        /// Force check (ignore 24h cache)
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -93,20 +96,20 @@ fn main() -> Result<()> {
         .with_target(false)
         .init();
 
-    // Initialize database
-    let pool = nexus_core::db::sqlite::create_pool()?;
-    nexus_core::db::sqlite::run_migrations(&pool)?;
-
-    // Setup and Onboard don't need DB
+    // Commands that don't need DB
     if matches!(cli.command, Commands::Setup) {
         return commands::setup::handle_setup();
     }
     if let Commands::Onboard { ref project_path, force } = cli.command {
         return commands::onboard::handle_onboard(project_path.as_deref(), force).map_err(Into::into);
     }
-    if let Commands::Update { check } = cli.command {
-        return commands::update::handle_update(check, &cli.format);
+    if let Commands::Update { check, force } = cli.command {
+        return commands::update::handle_update(check, force, &cli.format);
     }
+
+    // Initialize database
+    let pool = nexus_core::db::sqlite::create_pool()?;
+    nexus_core::db::sqlite::run_migrations(&pool)?;
 
     match cli.command {
         Commands::Setup => unreachable!(),
