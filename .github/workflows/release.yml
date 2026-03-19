@@ -39,15 +39,18 @@ jobs:
         run: cargo install tauri-cli --version "^2"
 
       - name: Build Tauri universal binary
-        working-directory: apps/desktop
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: cargo tauri build --target universal-apple-darwin
+        run: cargo tauri build --target universal-apple-darwin --bundles dmg,updater --config apps/desktop/src-tauri/tauri.conf.json
 
-      # Generate latest.json for updater
+      # Debug: list bundle output
       - name: List bundle output
-        run: find target/universal-apple-darwin/release/bundle -type f | head -30
+        if: always()
+        run: |
+          echo "=== Searching for bundle files ==="
+          find . -path "*/release/bundle" -type d 2>/dev/null
+          find . -name "*.dmg" -o -name "*.tar.gz.sig" -o -name "*.app.tar.gz" 2>/dev/null | head -20
 
       - name: Generate latest.json
         run: |
