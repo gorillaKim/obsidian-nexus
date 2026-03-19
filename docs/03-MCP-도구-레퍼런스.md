@@ -11,7 +11,7 @@ aliases:
 
 # MCP 도구 레퍼런스
 
-총 12개 도구 제공. AI 에이전트가 문서를 검색, 탐색, 분석하는 데 사용.
+총 13개 도구 제공. AI 에이전트가 문서를 검색, 탐색, 분석하는 데 사용.
 
 ## 검색
 
@@ -159,16 +159,35 @@ heading 기반 섹션 부분 읽기. 토큰 절약에 유용.
 
 `overall`: 모든 필수 항목 정상이면 `"ready"`, 아니면 `"not_ready"` (각 항목에 `error` 필드 포함).
 
+## 온보딩
+
+### nexus_onboard
+
+사서(librarian) 스킬과 서브에이전트를 대상 프로젝트에 설치. `.mcp.json`, `.claude/agents/librarian.md`, `.claude/skills/librarian/SKILL.md`를 생성한다.
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|----------|------|------|--------|------|
+| project_path | string | - | 현재 디렉토리 | 대상 프로젝트 루트 경로 |
+| force | boolean | - | false | 기존 파일 덮어쓰기 |
+
+**사용 예시:**
+```json
+nexus_onboard({ "project_path": "/path/to/my-project" })
+```
+
+생성 후 Claude Code 세션 재시작 필요.
+
 ## 에이전트 활용 패턴
 
 ```
-0. nexus_status → 시스템 상태 확인 (Ollama, DB 등)
-1. nexus_list_projects → 볼트 파악
-2. nexus_search("키워드") → 관련 문서 검색
-3. nexus_get_section(path, heading) → 필요한 섹션만 읽기
-4. nexus_get_backlinks(path) → 관련 문서 그래프 탐색
-5. nexus_resolve_alias("별칭") → 별칭으로 문서 접근
-6. nexus_sync_config(project) → on-config.json 변경 후 동기화
+0. nexus_onboard → 새 프로젝트에 사서 스킬/에이전트 설치
+1. nexus_status → 시스템 상태 확인 (Ollama, DB 등)
+2. nexus_list_projects → 볼트 파악
+3. nexus_search("키워드") → 관련 문서 검색
+4. nexus_get_section(path, heading) → 필요한 섹션만 읽기
+5. nexus_get_backlinks(path) → 관련 문서 그래프 탐색
+6. nexus_resolve_alias("별칭") → 별칭으로 문서 접근
+7. nexus_sync_config(project) → on-config.json 변경 후 동기화
 ```
 
 ## 관련 문서

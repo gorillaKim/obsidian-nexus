@@ -57,6 +57,14 @@ enum Commands {
     },
     /// Setup Obsidian Nexus (install dependencies, init DB)
     Setup,
+    /// Set up librarian skill & subagent in a project (.mcp.json, .claude/agents, .claude/skills)
+    Onboard {
+        /// Target project root path (default: current directory)
+        project_path: Option<String>,
+        /// Overwrite existing files
+        #[arg(long)]
+        force: bool,
+    },
     /// Access document content and metadata
     Doc {
         #[command(subcommand)]
@@ -83,13 +91,17 @@ fn main() -> Result<()> {
     let pool = nexus_core::db::sqlite::create_pool()?;
     nexus_core::db::sqlite::run_migrations(&pool)?;
 
-    // Setup doesn't need DB
+    // Setup and Onboard don't need DB
     if matches!(cli.command, Commands::Setup) {
         return commands::setup::handle_setup();
+    }
+    if let Commands::Onboard { ref project_path, force } = cli.command {
+        return commands::onboard::handle_onboard(project_path.as_deref(), force).map_err(Into::into);
     }
 
     match cli.command {
         Commands::Setup => unreachable!(),
+        Commands::Onboard { .. } => unreachable!(),
         Commands::Project { command } => {
             commands::project::handle(&pool, command, &cli.format)?;
         }

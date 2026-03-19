@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
-
 const NEXUS_HELP_TEXT: &str = r#"# Obsidian Nexus MCP — Available Tools
 
 ## Search & Discovery
@@ -24,11 +23,15 @@ const NEXUS_HELP_TEXT: &str = r#"# Obsidian Nexus MCP — Available Tools
 - **nexus_sync_config** — Sync project name from on-config.json
 - **nexus_status** — Check system health (Ollama, DB, config)
 
+## Setup
+- **nexus_onboard** — Set up librarian skill & subagent in any project
+
 ## Recommended Workflow
-1. `nexus_search` → find relevant documents
-2. `nexus_get_section` → read only the section you need (saves tokens!)
-3. `nexus_get_backlinks` → discover related documents via graph
-4. `nexus_get_metadata` → check tags and popularity
+1. `nexus_onboard` → set up librarian in your project
+2. `nexus_search` → find relevant documents
+3. `nexus_get_section` → read only the section you need (saves tokens!)
+4. `nexus_get_backlinks` → discover related documents via graph
+5. `nexus_get_metadata` → check tags and popularity
 "#;
 
 fn main() -> Result<()> {
@@ -251,6 +254,17 @@ fn handle_tools_list(id: &Value) -> Value {
                         "type": "object",
                         "properties": {}
                     }
+                },
+                {
+                    "name": "nexus_onboard",
+                    "description": "Set up librarian skill and subagent in a project. Creates .mcp.json, .claude/agents/librarian.md, and .claude/skills/librarian/SKILL.md",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project_path": { "type": "string", "description": "Target project root path (default: current working directory)" },
+                            "force": { "type": "boolean", "description": "Overwrite existing files (default: false)", "default": false }
+                        }
+                    }
                 }
             ]
         }
@@ -275,6 +289,7 @@ fn handle_tools_call(id: &Value, params: &Value, pool: &nexus_core::db::sqlite::
         "nexus_resolve_alias" => tool_resolve_alias(&args, pool),
         "nexus_status" => Ok(nexus_core::status::get_status(pool)),
         "nexus_help" => Ok(NEXUS_HELP_TEXT.to_string()),
+        "nexus_onboard" => tool_onboard(&args),
         _ => Err(format!("Unknown tool: {}", tool_name)),
     };
 
@@ -418,4 +433,11 @@ fn tool_resolve_alias(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> st
     let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
     let result = nexus_core::search::resolve_by_alias(pool, &proj.id, alias).map_err(|e| e.to_string())?;
     serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
+}
+
+fn tool_onboard(args: &Value) -> std::result::Result<String, String> {
+    let force = args.get("force").and_then(|f| f.as_bool()).unwrap_or(false);
+    let project_path = args.get("project_path").and_then(|p| p.as_str());
+    let result = nexus_core::onboard::onboard(project_path, force).map_err(|e| e.to_string())?;
+    Ok(result.report())
 }

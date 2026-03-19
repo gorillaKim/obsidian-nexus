@@ -4,6 +4,7 @@ pub mod embedding;
 pub mod error;
 pub mod index_engine;
 pub mod indexer;
+pub mod onboard;
 pub mod project;
 pub mod search;
 pub mod status;
