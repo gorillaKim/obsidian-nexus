@@ -75,6 +75,12 @@ enum Commands {
         /// Project ID or name (omit to watch all)
         project: Option<String>,
     },
+    /// Check for updates and install new version
+    Update {
+        /// Only check, don't install
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -98,6 +104,9 @@ fn main() -> Result<()> {
     if let Commands::Onboard { ref project_path, force } = cli.command {
         return commands::onboard::handle_onboard(project_path.as_deref(), force).map_err(Into::into);
     }
+    if let Commands::Update { check } = cli.command {
+        return commands::update::handle_update(check, &cli.format);
+    }
 
     match cli.command {
         Commands::Setup => unreachable!(),
@@ -117,6 +126,7 @@ fn main() -> Result<()> {
         Commands::Watch { project } => {
             commands::watch::handle_watch(&pool, project.as_deref())?;
         }
+        Commands::Update { .. } => unreachable!(),
     }
 
     Ok(())

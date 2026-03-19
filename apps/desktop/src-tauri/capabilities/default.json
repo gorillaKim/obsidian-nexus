@@ -6,6 +6,7 @@
     "core:default",
     "shell:allow-open",
     "updater:default",
+    "process:default",
     "dialog:default"
   ]
 }

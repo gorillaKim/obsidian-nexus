@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  # Job 1: Desktop — universal binary (aarch64 + x86_64 단일 빌드)
+  desktop:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable && pnpm install
+        working-directory: apps/desktop
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Obsidian Nexus ${{ github.ref_name }}'
+          releaseBody: 'See the assets to download this version.'
+          projectPath: apps/desktop
+          args: --target universal-apple-darwin
+
+  # Job 2: CLI — 아키텍처별 matrix (release는 desktop job이 생성)
+  cli:
+    needs: desktop
+    strategy:
+      matrix:
+        include:
+          - runner: macos-14
+            arch: aarch64
+          - runner: macos-13
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo build --release -p nexus-cli -p nexus-mcp-server
+      - run: tar czf nexus-cli-darwin-${{ matrix.arch }}.tar.gz -C target/release nexus nexus-mcp-server
+      - run: shasum -a 256 nexus-cli-darwin-${{ matrix.arch }}.tar.gz > nexus-cli-darwin-${{ matrix.arch }}.tar.gz.sha256
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            nexus-cli-darwin-${{ matrix.arch }}.tar.gz
+            nexus-cli-darwin-${{ matrix.arch }}.tar.gz.sha256

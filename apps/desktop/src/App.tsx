@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import Markdown from "react-markdown";
+import { UpdateChecker } from "./components/UpdateChecker";
 import remarkGfm from "remark-gfm";
 
 interface Project {
@@ -77,6 +78,9 @@ function SettingsTab() {
   return (
     <div className="max-w-2xl mx-auto">
       <h2 className="text-lg font-bold mb-4" style={{ color: "var(--accent)" }}>설정</h2>
+      <div className="mb-6">
+        <UpdateChecker variant="settings" />
+      </div>
 
       <div className="p-4 rounded-lg mb-4" style={{ background: "var(--bg-secondary)", border: `1px solid var(--border)` }}>
         <h3 className="font-medium mb-3">MCP 서버 자동 등록</h3>
@@ -305,6 +309,7 @@ function App() {
       {/* 헤더 */}
       <header className="px-6 py-4 flex items-center gap-4 border-b sticky top-0 z-50" style={{ borderColor: "var(--border)", background: "var(--bg-primary)" }}>
         <h1 className="text-xl font-bold" style={{ color: "var(--accent)" }}>Obsidian Nexus</h1>
+        <UpdateChecker variant="badge" />
         <nav className="flex gap-2 ml-auto">
           {(["dashboard", "search", "projects", "guide", "settings"] as Tab[]).map((t) => (
             <button

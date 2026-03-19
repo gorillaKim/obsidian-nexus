@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capabilities for Obsidian Nexus","local":true,"windows":["main"],"permissions":["core:default","shell:allow-open","updater:default","dialog:default"]}}
+{"default":{"identifier":"default","description":"Default capabilities for Obsidian Nexus","local":true,"windows":["main"],"permissions":["core:default","shell:allow-open","updater:default","process:default","dialog:default"]}}
