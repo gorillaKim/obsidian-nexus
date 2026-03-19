@@ -160,21 +160,74 @@ pub struct ProjectStats {
     pub pending_count: i64,
 }
 
-/// Read vault display name from on-config.json, falling back to folder name
+/// Read vault config from on-config.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultConfig {
+    pub name: String,
+}
+
+/// Read vault display name from on-config.json, falling back to folder name.
+/// If on-config.json doesn't exist, creates it with default folder name.
 fn read_vault_name(vault_path: &std::path::Path) -> String {
+    let config = read_or_create_vault_config(vault_path);
+    config.name
+}
+
+/// Read on-config.json, creating it with defaults if missing
+pub fn read_or_create_vault_config(vault_path: &std::path::Path) -> VaultConfig {
     let config_path = vault_path.join("on-config.json");
+    let default_name = vault_path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "vault".to_string());
+
     if let Ok(content) = std::fs::read_to_string(&config_path) {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(name) = val.get("name").and_then(|n| n.as_str()) {
-                if !name.is_empty() {
-                    return name.to_string();
-                }
+        if let Ok(config) = serde_json::from_str::<VaultConfig>(&content) {
+            if !config.name.is_empty() {
+                return config;
             }
         }
     }
-    vault_path.file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "vault".to_string())
+
+    // Create default config
+    let config = VaultConfig { name: default_name };
+    if let Ok(json) = serde_json::to_string_pretty(&config) {
+        let _ = std::fs::write(&config_path, json);
+    }
+    config
+}
+
+/// Sync project name from on-config.json (manual refresh)
+pub fn sync_vault_config(pool: &DbPool, id_or_name: &str) -> Result<Project> {
+    let project = get_project(pool, id_or_name)?;
+    let vault_path = std::path::Path::new(&project.path);
+    let config = read_or_create_vault_config(vault_path);
+
+    if config.name != project.name {
+        let conn = pool.get()?;
+        // Check if new name conflicts
+        let conflict: Option<String> = conn.query_row(
+            "SELECT id FROM projects WHERE name = ?1 AND id != ?2",
+            params![config.name, project.id],
+            |row| row.get(0),
+        ).ok();
+
+        if conflict.is_some() {
+            return Err(NexusError::ProjectAlreadyExists(config.name));
+        }
+
+        conn.execute(
+            "UPDATE projects SET name = ?1, vault_name = ?1 WHERE id = ?2",
+            params![config.name, project.id],
+        )?;
+
+        Ok(Project {
+            name: config.name.clone(),
+            vault_name: Some(config.name),
+            ..project
+        })
+    } else {
+        Ok(project)
+    }
 }
 
 /// Detect Obsidian vaults under a directory (folders containing .obsidian/)

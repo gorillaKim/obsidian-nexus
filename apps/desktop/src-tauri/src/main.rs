@@ -243,6 +243,14 @@ fn remove_project(state: State<AppState>, project_id: String) -> Result<(), Stri
     nexus_core::project::remove_project(&state.pool, &project_id).map_err(|e| e.to_string())
 }
 
+/// Sync project name from on-config.json
+#[tauri::command]
+fn sync_vault_config(state: State<AppState>, project_id: String) -> Result<serde_json::Value, String> {
+    let updated = nexus_core::project::sync_vault_config(&state.pool, &project_id)
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!(updated))
+}
+
 /// Detect Obsidian vaults under a directory
 #[tauri::command]
 fn detect_vaults(path: String) -> Result<Vec<(String, String)>, String> {
@@ -319,6 +327,7 @@ fn main() {
             list_documents,
             detect_vaults,
             auto_add_vaults,
+            sync_vault_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

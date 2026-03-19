@@ -160,6 +160,17 @@ fn handle_tools_list(id: &Value) -> Value {
                     }
                 },
                 {
+                    "name": "nexus_sync_config",
+                    "description": "Sync project name from on-config.json in vault root. Call after editing on-config.json.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Project name or ID to sync" }
+                        },
+                        "required": ["project"]
+                    }
+                },
+                {
                     "name": "nexus_get_backlinks",
                     "description": "Get documents that link to this document (backlinks)",
                     "inputSchema": {
@@ -211,6 +222,7 @@ fn handle_tools_call(id: &Value, params: &Value, pool: &nexus_core::db::sqlite::
         "nexus_get_metadata" => tool_get_metadata(&args, pool),
         "nexus_list_documents" => tool_list_documents(&args, pool),
         "nexus_index_project" => tool_index_project(&args, pool),
+        "nexus_sync_config" => tool_sync_config(&args, pool),
         "nexus_get_section" => tool_get_section(&args, pool),
         "nexus_get_backlinks" => tool_get_backlinks(&args, pool),
         "nexus_get_links" => tool_get_links(&args, pool),
@@ -288,6 +300,12 @@ fn tool_get_document(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std
     }
 
     nexus_core::search::get_document_content(pool, &proj.id, path).map_err(|e| e.to_string())
+}
+
+fn tool_sync_config(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
+    let project = args.get("project").and_then(|p| p.as_str()).ok_or("Missing 'project'")?;
+    let updated = nexus_core::project::sync_vault_config(pool, project).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&updated).map_err(|e| e.to_string())
 }
 
 fn tool_get_section(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
