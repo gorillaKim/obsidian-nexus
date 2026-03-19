@@ -59,6 +59,7 @@ function App() {
   const [projectDocs, setProjectDocs] = useState<Map<string, DocItem[]>>(new Map());
   const [searchMode, setSearchMode] = useState<SearchMode>("hybrid");
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState(false);
   const [hybridWeight, setHybridWeight] = useState(0.7);
   const [minVectorScore, setMinVectorScore] = useState(0.65);
@@ -474,28 +475,42 @@ function App() {
                       </div>
                       {isExpanded && tree && (
                         <div className="ml-3">
-                          {Array.from(tree.folders.entries()).map(([folder, folderDocs]) => (
-                            <div key={folder} className="mb-0.5">
-                              <div className="flex items-center gap-1 px-2 py-0.5 text-xs opacity-50">
-                                <span>📁</span>
-                                <span>{folder}</span>
+                          {Array.from(tree.folders.entries()).map(([folder, folderDocs]) => {
+                            const folderKey = `${p.id}/${folder}`;
+                            const isFolderOpen = expandedFolders.has(folderKey);
+                            return (
+                              <div key={folder} className="mb-0.5">
+                                <div
+                                  className="flex items-center gap-1 px-2 py-0.5 text-xs opacity-50 cursor-pointer hover:opacity-80"
+                                  onClick={() => {
+                                    setExpandedFolders((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(folderKey)) next.delete(folderKey);
+                                      else next.add(folderKey);
+                                      return next;
+                                    });
+                                  }}>
+                                  <span>{isFolderOpen ? "▼" : "▶"}</span>
+                                  <span>📁 {folder}</span>
+                                  <span className="ml-auto opacity-30">{folderDocs.length}</span>
+                                </div>
+                                {isFolderOpen && folderDocs.map((doc) => {
+                                  const isActive = viewingDoc?.filePath === doc.file_path;
+                                  return (
+                                    <div key={doc.id}
+                                      className="flex items-center gap-1 px-4 py-1 rounded cursor-pointer hover:opacity-80 text-xs"
+                                      style={{
+                                        background: isActive ? "var(--accent)" : "transparent",
+                                        color: isActive ? "#1a1b26" : "var(--text-secondary)",
+                                      }}
+                                      onClick={() => viewDocument(p.id, doc.file_path)}>
+                                      <span className="truncate">{doc.title || doc.file_path.split("/").pop()}</span>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                              {folderDocs.map((doc) => {
-                                const isActive = viewingDoc?.filePath === doc.file_path;
-                                return (
-                                  <div key={doc.id}
-                                    className="flex items-center gap-1 px-4 py-1 rounded cursor-pointer hover:opacity-80 text-xs"
-                                    style={{
-                                      background: isActive ? "var(--accent)" : "transparent",
-                                      color: isActive ? "#1a1b26" : "var(--text-secondary)",
-                                    }}
-                                    onClick={() => viewDocument(p.id, doc.file_path)}>
-                                    <span className="truncate">{doc.title || doc.file_path.split("/").pop()}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ))}
+                            );
+                          })}
                           {tree.rootDocs.map((doc) => {
                             const isActive = viewingDoc?.filePath === doc.file_path;
                             return (

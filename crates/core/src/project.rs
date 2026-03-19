@@ -160,6 +160,80 @@ pub struct ProjectStats {
     pub pending_count: i64,
 }
 
+/// Detect Obsidian vaults under a directory (folders containing .obsidian/)
+/// Returns list of (vault_name, vault_path) pairs
+pub fn detect_vaults(root_path: &str) -> Result<Vec<(String, String)>> {
+    let root = std::path::Path::new(root_path);
+    if !root.is_dir() {
+        return Err(NexusError::PathNotFound(root_path.to_string()));
+    }
+
+    let mut vaults = Vec::new();
+
+    // Check if root itself is a vault
+    if root.join(".obsidian").is_dir() {
+        let name = root.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "vault".to_string());
+        let abs = std::fs::canonicalize(root)
+            .map_err(|_| NexusError::PathNotFound(root_path.to_string()))?;
+        vaults.push((name, abs.to_string_lossy().to_string()));
+        return Ok(vaults); // Don't recurse into sub-vaults
+    }
+
+    // Recurse into subdirectories (max depth 3 to avoid deep traversal)
+    fn scan(dir: &std::path::Path, vaults: &mut Vec<(String, String)>, depth: usize) {
+        if depth > 3 { return; }
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() { continue; }
+            let name = path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            // Skip hidden directories and common non-vault dirs
+            if name.starts_with('.') || name == "node_modules" || name == "target" {
+                continue;
+            }
+            if path.join(".obsidian").is_dir() {
+                let abs = std::fs::canonicalize(&path).unwrap_or(path.clone());
+                vaults.push((name, abs.to_string_lossy().to_string()));
+                // Don't recurse into a vault's subdirectories
+            } else {
+                scan(&path, vaults, depth + 1);
+            }
+        }
+    }
+
+    scan(root, &mut vaults, 0);
+    vaults.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(vaults)
+}
+
+/// Auto-detect and register all vaults under a directory
+pub fn auto_add_vaults(pool: &DbPool, root_path: &str) -> Result<Vec<Project>> {
+    let vaults = detect_vaults(root_path)?;
+    let mut added = Vec::new();
+    for (name, path) in vaults {
+        match add_project(pool, &name, &path, Some(&name)) {
+            Ok(proj) => added.push(proj),
+            Err(NexusError::ProjectAlreadyExists(_)) => {
+                // Already registered, skip
+                if let Ok(proj) = get_project(pool, &name) {
+                    added.push(proj);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to add vault {}: {}", name, e);
+            }
+        }
+    }
+    Ok(added)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

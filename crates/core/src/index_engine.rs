@@ -177,15 +177,19 @@ fn index_single_file(
 
     // 7. Insert wiki links (resolve target_doc_id within same project)
     for link in &parsed.wiki_links {
-        // Try to resolve: match target against file_path (with or without .md)
+        // Try to resolve: match target against file_path
+        // Supports: exact path, with .md, filename-only (Obsidian shortest-path match)
         let target_with_md = if link.target.ends_with(".md") {
             link.target.clone()
         } else {
             format!("{}.md", link.target)
         };
+        // Also try matching just the filename part (e.g. "rust-ownership" matches "references/rust-ownership.md")
+        let filename_match = format!("%/{}.md", link.target);
         let target_doc_id: Option<String> = tx.query_row(
-            "SELECT id FROM documents WHERE project_id = ?1 AND (file_path = ?2 OR file_path = ?3)",
-            params![project_id, link.target, target_with_md],
+            "SELECT id FROM documents WHERE project_id = ?1
+             AND (file_path = ?2 OR file_path = ?3 OR file_path LIKE ?4)",
+            params![project_id, link.target, target_with_md, filename_match],
             |row| row.get(0),
         ).ok();
 

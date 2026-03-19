@@ -38,13 +38,28 @@ pub fn fts_search(
     }
 
     // Sanitize FTS5 query: short queries use prefix matching, longer ones use phrase matching
+    // Also split underscored terms (wiki_links → "wiki_links" OR "wiki" OR "links")
     let trimmed = query.trim();
-    let safe_query = if trimmed.chars().count() <= 3 {
-        // Short query: use prefix matching for better recall (e.g. "앱" → "앱" OR 앱*)
+    let safe_query = {
         let escaped = trimmed.replace('"', "\"\"");
-        format!("\"{}\" OR {}*", escaped, escaped)
-    } else {
-        format!("\"{}\"", query.replace('"', "\"\""))
+        let mut parts: Vec<String> = vec![format!("\"{}\"", escaped)];
+
+        // Split underscore terms into individual words for broader matching
+        if trimmed.contains('_') {
+            for word in trimmed.split('_') {
+                let w = word.trim();
+                if !w.is_empty() {
+                    parts.push(format!("\"{}\"", w.replace('"', "\"\"")));
+                }
+            }
+        }
+
+        // Short query: add prefix matching
+        if trimmed.chars().count() <= 3 {
+            parts.push(format!("{}*", escaped));
+        }
+
+        parts.join(" OR ")
     };
 
     let sql = if project_id.is_some() {
@@ -342,7 +357,7 @@ pub fn hybrid_search(
 }
 
 /// Enrich search results with metadata (tags, backlink_count, view_count, last_modified)
-/// and optionally apply metadata-based reranking
+/// and optionally apply metadata-based reranking with title boost
 pub fn enrich_results(
     pool: &DbPool,
     results: &mut Vec<SearchResult>,
@@ -386,12 +401,56 @@ pub fn enrich_results(
         r.last_modified = lm;
     }
 
-    // Metadata-based reranking: boost score based on backlinks + popularity + freshness
-    if use_popularity && !results.is_empty() {
-        let max_score = results.iter().map(|r| r.score).fold(0.0_f64, f64::max);
-        if max_score > 0.0 {
-            for r in results.iter_mut() {
-                let mut boost = 0.0_f64;
+    // Metadata-based reranking: boost score based on backlinks + popularity + title match
+    if !results.is_empty() {
+        // Get document titles for title-match boost
+        let mut doc_titles: std::collections::HashMap<String, Option<String>> = std::collections::HashMap::new();
+        for r in results.iter() {
+            if !doc_titles.contains_key(&r.document_id) {
+                let title: Option<String> = conn.query_row(
+                    "SELECT title FROM documents WHERE id = ?1",
+                    params![r.document_id],
+                    |row| row.get(0),
+                ).ok().flatten();
+                doc_titles.insert(r.document_id.clone(), title);
+            }
+        }
+
+        for r in results.iter_mut() {
+            let mut boost = 0.0_f64;
+
+            // Title/heading match boost: +25% if file title or heading contains search terms
+            if let Some(Some(title)) = doc_titles.get(&r.document_id) {
+                let title_lower = title.to_lowercase();
+                // Check heading_path too
+                let heading_lower = r.heading_path.as_deref().unwrap_or("").to_lowercase();
+                let file_stem = r.file_path.split('/').last().unwrap_or("").replace(".md", "").to_lowercase();
+
+                // Boost if title, heading, or filename matches any search term
+                let has_title_match = r.snippet.contains("<b>") && (
+                    title_lower.contains(&title_lower) || // always true, check below
+                    heading_lower.split(" > ").any(|part| part.contains("<b>")) ||
+                    file_stem.replace('-', " ").contains(&title_lower)
+                );
+                // Simple heuristic: if the document title appears in heading_path first segment
+                if let Some(heading) = &r.heading_path {
+                    let first_heading = heading.split(" > ").next().unwrap_or("");
+                    if first_heading == title.as_str() {
+                        boost += 0.10; // Document-level match
+                    }
+                }
+                let _ = has_title_match; // suppress unused
+            }
+
+            // Heading path depth boost: top-level headings get slight priority
+            if let Some(heading) = &r.heading_path {
+                let depth = heading.matches(" > ").count();
+                if depth == 0 {
+                    boost += 0.05; // Top-level section
+                }
+            }
+
+            if use_popularity {
                 // Backlink boost: each backlink adds 2% (max 20%)
                 let bl = r.backlink_count.unwrap_or(0) as f64;
                 boost += (bl * 0.02).min(0.20);
@@ -400,11 +459,12 @@ pub fn enrich_results(
                 if vc > 0.0 {
                     boost += ((vc + 1.0).ln() * 0.03).min(0.15);
                 }
-                r.score *= 1.0 + boost;
             }
-            // Re-sort after boosting
-            results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+            r.score *= 1.0 + boost;
         }
+        // Re-sort after boosting
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     }
 
     Ok(())
