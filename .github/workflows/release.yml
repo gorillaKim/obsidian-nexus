@@ -22,6 +22,19 @@ jobs:
       - run: corepack enable && pnpm install
         working-directory: apps/desktop
 
+      # Build sidecars for both architectures before Tauri build
+      - name: Build sidecars (aarch64)
+        run: |
+          cargo build --release --target aarch64-apple-darwin -p nexus-cli -p nexus-mcp-server
+          cp target/aarch64-apple-darwin/release/nexus apps/desktop/src-tauri/binaries/nexus-aarch64-apple-darwin
+          cp target/aarch64-apple-darwin/release/nexus-mcp-server apps/desktop/src-tauri/binaries/nexus-mcp-server-aarch64-apple-darwin
+
+      - name: Build sidecars (x86_64)
+        run: |
+          cargo build --release --target x86_64-apple-darwin -p nexus-cli -p nexus-mcp-server
+          cp target/x86_64-apple-darwin/release/nexus apps/desktop/src-tauri/binaries/nexus-x86_64-apple-darwin
+          cp target/x86_64-apple-darwin/release/nexus-mcp-server apps/desktop/src-tauri/binaries/nexus-mcp-server-x86_64-apple-darwin
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
