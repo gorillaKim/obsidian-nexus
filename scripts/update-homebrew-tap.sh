@@ -87,6 +87,8 @@ cask "obsidian-nexus" do
   desc "Agent-friendly knowledge search engine for Obsidian vaults"
   homepage "https://github.com/gorillaKim/obsidian-nexus"
 
+  quarantine false
+
   app "Obsidian Nexus.app"
 
   zap trash: [
