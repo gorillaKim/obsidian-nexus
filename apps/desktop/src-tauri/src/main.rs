@@ -712,7 +712,7 @@ fn chat_close_session(state: State<AppState>, session_id: String) -> Result<(), 
 
 fn find_sidecar_script() -> std::path::PathBuf {
     // Try multiple candidate paths
-    let candidates = vec![
+    let mut candidates = vec![
         // Dev: Tauri runs from src-tauri, cwd is project root
         std::env::current_dir()
             .unwrap_or_default()
@@ -727,6 +727,13 @@ fn find_sidecar_script() -> std::path::PathBuf {
                 .unwrap_or_default(),
         ),
     ];
+
+    // Bundled resource (production): next to the exe
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.insert(0, dir.join("claude-bridge.mjs"));
+        }
+    }
 
     for path in &candidates {
         if path.exists() {
