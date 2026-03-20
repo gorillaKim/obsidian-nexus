@@ -14,7 +14,7 @@
     "createUpdaterArtifacts": true,
     "externalBin": [
       "binaries/nexus-mcp-server",
-      "binaries/nexus"
+      "binaries/obs-nexus"
     ],
     "icon": [
       "icons/32x32.png",

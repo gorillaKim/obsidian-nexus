@@ -15,7 +15,7 @@ class ObsidianNexus < Formula
   end
 
   def install
-    bin.install "nexus"
+    bin.install "obs-nexus"
     bin.install "nexus-mcp-server"
   end
 

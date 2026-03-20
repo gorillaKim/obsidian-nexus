@@ -76,7 +76,7 @@ success "체크섬 검증 완료"
 mkdir -p "$INSTALL_DIR"
 tar xzf "${TMP_DIR}/${TARBALL}" -C "$TMP_DIR"
 
-for BIN in nexus nexus-mcp-server; do
+for BIN in obs-nexus nexus-mcp-server; do
   if [[ -f "${TMP_DIR}/${BIN}" ]]; then
     install -m 755 "${TMP_DIR}/${BIN}" "${INSTALL_DIR}/${BIN}"
     success "${BIN} → ${INSTALL_DIR}/${BIN}"

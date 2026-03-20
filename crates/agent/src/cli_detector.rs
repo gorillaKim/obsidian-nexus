@@ -110,18 +110,74 @@ fn detect_gemini() -> Option<DetectedAgent> {
 }
 
 fn find_cli_path(name: &str) -> Option<PathBuf> {
-    let output = Command::new("which").arg(name).output().ok()?;
+    // Try `which` first (works in terminal context)
+    if let Some(path) = try_which(name) {
+        return Some(path);
+    }
 
+    // GUI apps (e.g. Tauri via Homebrew) don't inherit full shell PATH.
+    // Fall back to well-known install locations.
+    let home = dirs::home_dir().unwrap_or_default();
+    let candidates: Vec<PathBuf> = vec![
+        // npm global (default & nvm)
+        home.join(".npm-global/bin").join(name),
+        home.join(".npm/bin").join(name),
+        // nvm common locations
+        home.join(".nvm/versions/node").join("*/bin").join(name),
+        // fnm / volta / n
+        home.join(".local/share/fnm/node-versions/*/installation/bin").join(name),
+        home.join(".volta/bin").join(name),
+        home.join("n/bin").join(name),
+        // Homebrew (Apple Silicon & Intel)
+        PathBuf::from("/opt/homebrew/bin").join(name),
+        PathBuf::from("/usr/local/bin").join(name),
+        // ~/.local/bin (nexus installs symlinks here)
+        home.join(".local/bin").join(name),
+    ];
+
+    for candidate in candidates {
+        // Expand simple glob patterns (single '*' segment)
+        if candidate.to_string_lossy().contains('*') {
+            if let Some(found) = glob_first(&candidate) {
+                return Some(found);
+            }
+        } else if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+fn try_which(name: &str) -> Option<PathBuf> {
+    let output = Command::new("which").arg(name).output().ok()?;
     if !output.status.success() {
         return None;
     }
-
     let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if path_str.is_empty() {
         return None;
     }
-
     Some(PathBuf::from(path_str))
+}
+
+/// Resolve the first existing path that contains a `*` glob segment.
+fn glob_first(pattern: &PathBuf) -> Option<PathBuf> {
+    let pattern_str = pattern.to_string_lossy();
+    let parts: Vec<&str> = pattern_str.split('/').collect();
+    let star_idx = parts.iter().position(|p| *p == "*")?;
+
+    let base: PathBuf = parts[..star_idx].iter().collect();
+    let suffix: PathBuf = parts[star_idx + 1..].iter().collect();
+
+    let entries = std::fs::read_dir(&base).ok()?;
+    let mut found: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path().join(&suffix))
+        .filter(|p| p.exists())
+        .collect();
+    found.sort();
+    found.into_iter().last() // pick highest version
 }
 
 fn get_cli_version(path: &PathBuf, args: &[&str]) -> Option<String> {

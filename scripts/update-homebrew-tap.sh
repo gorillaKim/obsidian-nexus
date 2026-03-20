@@ -58,7 +58,7 @@ class ObsidianNexus < Formula
   end
 
   def install
-    bin.install "nexus"
+    bin.install "obs-nexus"
     bin.install "nexus-mcp-server"
   end
 
@@ -86,8 +86,6 @@ cask "obsidian-nexus" do
   name "Obsidian Nexus"
   desc "Agent-friendly knowledge search engine for Obsidian vaults"
   homepage "https://github.com/gorillaKim/obsidian-nexus"
-
-  quarantine false
 
   app "Obsidian Nexus.app"
 

@@ -50,17 +50,17 @@ jobs:
             --target aarch64-apple-darwin \
             --target x86_64-apple-darwin \
             -p nexus-cli -p nexus-mcp-server
-          cp target/aarch64-apple-darwin/release/nexus            apps/desktop/src-tauri/binaries/nexus-aarch64-apple-darwin
+          cp target/aarch64-apple-darwin/release/obs-nexus         apps/desktop/src-tauri/binaries/obs-nexus-aarch64-apple-darwin
           cp target/aarch64-apple-darwin/release/nexus-mcp-server apps/desktop/src-tauri/binaries/nexus-mcp-server-aarch64-apple-darwin
-          cp target/x86_64-apple-darwin/release/nexus             apps/desktop/src-tauri/binaries/nexus-x86_64-apple-darwin
+          cp target/x86_64-apple-darwin/release/obs-nexus          apps/desktop/src-tauri/binaries/obs-nexus-x86_64-apple-darwin
           cp target/x86_64-apple-darwin/release/nexus-mcp-server  apps/desktop/src-tauri/binaries/nexus-mcp-server-x86_64-apple-darwin
 
       - name: Create universal sidecars
         run: |
           lipo -create \
-            apps/desktop/src-tauri/binaries/nexus-aarch64-apple-darwin \
-            apps/desktop/src-tauri/binaries/nexus-x86_64-apple-darwin \
-            -output apps/desktop/src-tauri/binaries/nexus-universal-apple-darwin
+            apps/desktop/src-tauri/binaries/obs-nexus-aarch64-apple-darwin \
+            apps/desktop/src-tauri/binaries/obs-nexus-x86_64-apple-darwin \
+            -output apps/desktop/src-tauri/binaries/obs-nexus-universal-apple-darwin
           lipo -create \
             apps/desktop/src-tauri/binaries/nexus-mcp-server-aarch64-apple-darwin \
             apps/desktop/src-tauri/binaries/nexus-mcp-server-x86_64-apple-darwin \
@@ -135,10 +135,10 @@ jobs:
             --target x86_64-apple-darwin \
             -p nexus-cli -p nexus-mcp-server
 
-          tar czf nexus-cli-darwin-aarch64.tar.gz -C target/aarch64-apple-darwin/release nexus nexus-mcp-server
+          tar czf nexus-cli-darwin-aarch64.tar.gz -C target/aarch64-apple-darwin/release obs-nexus nexus-mcp-server
           shasum -a 256 nexus-cli-darwin-aarch64.tar.gz > nexus-cli-darwin-aarch64.tar.gz.sha256
 
-          tar czf nexus-cli-darwin-x86_64.tar.gz -C target/x86_64-apple-darwin/release nexus nexus-mcp-server
+          tar czf nexus-cli-darwin-x86_64.tar.gz -C target/x86_64-apple-darwin/release obs-nexus nexus-mcp-server
           shasum -a 256 nexus-cli-darwin-x86_64.tar.gz > nexus-cli-darwin-x86_64.tar.gz.sha256
 
       - uses: softprops/action-gh-release@v2

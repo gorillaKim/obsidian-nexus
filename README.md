@@ -115,7 +115,7 @@ cd apps/desktop && pnpm install && pnpm tauri:build
 ### 1. 초기화
 
 ```bash
-nexus setup
+obs-nexus setup
 ```
 
 - Ollama 설치 여부 확인 및 임베딩 모델(`nomic-embed-text`) 다운로드
@@ -126,21 +126,21 @@ nexus setup
 ### 2. Obsidian 볼트 등록
 
 ```bash
-nexus project add --name "my-vault" --path /path/to/obsidian/vault
+obs-nexus project add --name "my-vault" --path /path/to/obsidian/vault
 ```
 
 ### 3. 문서 인덱싱
 
 ```bash
-nexus index my-vault      # 특정 볼트 인덱싱
-nexus index --all         # 모든 볼트 인덱싱
+obs-nexus index my-vault      # 특정 볼트 인덱싱
+obs-nexus index --all         # 모든 볼트 인덱싱
 ```
 
 ### 4. AI 에이전트(MCP) 연동
 
 ```bash
 # 자동 설정 — .mcp.json 생성 + 에이전트 프롬프트 주입
-nexus onboard /path/to/my-project
+obs-nexus onboard /path/to/my-project
 ```
 
 또는 수동으로 `.mcp.json` 생성:
@@ -165,25 +165,25 @@ nexus onboard /path/to/my-project
 
 ```bash
 # 검색
-nexus search "검색어"                           # 하이브리드 검색 (기본)
-nexus search "query" --mode keyword            # 키워드 검색
-nexus search "query" --mode vector             # 벡터 검색
-nexus search "query" --project my-vault --limit 10
+obs-nexus search "검색어"                           # 하이브리드 검색 (기본)
+obs-nexus search "query" --mode keyword            # 키워드 검색
+obs-nexus search "query" --mode vector             # 벡터 검색
+obs-nexus search "query" --project my-vault --limit 10
 
 # 프로젝트 관리
-nexus project add --name "vault" --path /path/to/vault
-nexus project list
-nexus project remove my-vault
+obs-nexus project add --name "vault" --path /path/to/vault
+obs-nexus project list
+obs-nexus project remove my-vault
 
 # 인덱싱
-nexus index my-vault      # 특정 볼트
-nexus index --all         # 전체
-nexus watch               # 실시간 파일 감시
+obs-nexus index my-vault      # 특정 볼트
+obs-nexus index --all         # 전체
+obs-nexus watch               # 실시간 파일 감시
 
 # 업데이트
-nexus update              # 최신 버전 확인 + 설치
-nexus update --check      # 확인만
-nexus update --force      # 캐시 무시하고 강제 확인
+obs-nexus update              # 최신 버전 확인 + 설치
+obs-nexus update --check      # 확인만
+obs-nexus update --force      # 캐시 무시하고 강제 확인
 ```
 
 ### MCP Tools (AI 에이전트용)

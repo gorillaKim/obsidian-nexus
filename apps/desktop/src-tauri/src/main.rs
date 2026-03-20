@@ -160,7 +160,7 @@ fn find_mcp_binary() -> Option<String> {
 
 /// Find the CLI binary path
 fn find_cli_binary() -> Option<String> {
-    find_sidecar("nexus")
+    find_sidecar("obs-nexus")
 }
 
 /// Register MCP server in a JSON config file under "mcpServers.nexus"
@@ -474,7 +474,7 @@ fn install_cli_symlinks() {
         }
     }
 
-    for name in &["nexus", "nexus-mcp-server"] {
+    for name in &["obs-nexus", "nexus-mcp-server"] {
         if let Some(sidecar_path) = find_sidecar(name) {
             let link_path = bin_dir.join(name);
             // Skip if already pointing to the correct target
