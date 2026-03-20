@@ -8,6 +8,40 @@ use tracing::{debug, info, warn};
 
 use crate::error::AgentError;
 
+/// Find the Node.js binary, searching common locations including nvm.
+/// macOS GUI apps don't inherit shell PATH, so we must search explicitly.
+fn find_node_binary() -> PathBuf {
+    // 1. Common system/brew paths
+    let system_candidates = [
+        "/usr/local/bin/node",
+        "/opt/homebrew/bin/node",
+        "/usr/bin/node",
+    ];
+    for path in &system_candidates {
+        if std::path::Path::new(path).exists() {
+            return PathBuf::from(path);
+        }
+    }
+
+    // 2. nvm: ~/.nvm/versions/node/*/bin/node (pick highest version)
+    if let Some(home) = dirs::home_dir() {
+        let nvm_dir = home.join(".nvm/versions/node");
+        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+            let mut versions: Vec<_> = entries.flatten().collect();
+            versions.sort_by_key(|e| e.file_name());
+            for entry in versions.iter().rev() {
+                let candidate = entry.path().join("bin/node");
+                if candidate.exists() {
+                    return candidate;
+                }
+            }
+        }
+    }
+
+    // 3. Fallback: hope it's in PATH
+    PathBuf::from("node")
+}
+
 /// A JSONL response from the sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BridgeResponse {
@@ -80,7 +114,10 @@ impl SidecarManager {
 
         info!("Starting sidecar: node {}", self.sidecar_script.display());
 
-        let mut child = Command::new("node")
+        let node_bin = find_node_binary();
+        info!("Using node binary: {}", node_bin.display());
+
+        let mut child = Command::new(&node_bin)
             .arg(&self.sidecar_script)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

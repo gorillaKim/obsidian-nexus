@@ -8,6 +8,22 @@
  */
 
 import { createInterface } from "readline";
+import { existsSync } from "fs";
+import { homedir } from "os";
+
+/** Find the claude CLI binary, searching common locations */
+function findClaudeBinary() {
+  const candidates = [
+    `${homedir()}/.local/bin/claude`,
+    "/usr/local/bin/claude",
+    "/opt/homebrew/bin/claude",
+    "/usr/bin/claude",
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return "claude"; // fallback: hope it's in PATH
+}
 
 const log = (...args) => process.stderr.write(`[bridge] ${args.join(" ")}\n`);
 
@@ -50,6 +66,7 @@ async function handleStart(req) {
     systemPrompt,
     mcpServers: mcpServers || {},
     permissionMode: "bypassPermissions",
+    pathToClaudeCodeExecutable: findClaudeBinary(),
   };
 
   sessions.set(sessionId, {

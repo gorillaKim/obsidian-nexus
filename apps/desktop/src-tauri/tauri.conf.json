@@ -17,7 +17,9 @@
       "binaries/obs-nexus"
     ],
     "resources": {
-      "../sidecar/claude-bridge.mjs": "claude-bridge.mjs"
+      "../sidecar/claude-bridge.mjs": "sidecar/claude-bridge.mjs",
+      "../sidecar/node_modules": "sidecar/node_modules",
+      "../sidecar/package.json": "sidecar/package.json"
     },
     "icon": [
       "icons/32x32.png",

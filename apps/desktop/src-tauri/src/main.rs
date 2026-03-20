@@ -728,10 +728,15 @@ fn find_sidecar_script() -> std::path::PathBuf {
         ),
     ];
 
-    // Bundled resource (production): next to the exe
+    // Bundled resource (production): in Resources/sidecar/ (macOS app bundle)
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.insert(0, dir.join("claude-bridge.mjs"));
+        if let Some(macos_dir) = exe.parent() {
+            // MacOS/../Resources/sidecar/claude-bridge.mjs
+            let resources = macos_dir.parent()
+                .map(|p| p.join("Resources/sidecar/claude-bridge.mjs"));
+            if let Some(path) = resources {
+                candidates.insert(0, path);
+            }
         }
     }
 
