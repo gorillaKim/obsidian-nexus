@@ -19,7 +19,26 @@ Agent-friendly knowledge search engine for Obsidian vaults.
 
 ## Installation
 
-### 방법 1: 원클릭 설치 스크립트 (권장)
+### 방법 1: Homebrew (권장)
+
+```bash
+# 탭 등록 + 설치 (한 번만)
+brew tap gorillakim/nexus
+brew install nexus                    # CLI + MCP 서버
+brew install --cask obsidian-nexus   # Desktop 앱
+```
+
+업데이트:
+```bash
+brew upgrade nexus
+brew upgrade --cask obsidian-nexus
+```
+
+> Homebrew가 없다면: [brew.sh](https://brew.sh) — `xcode-select --install && /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
+
+---
+
+### 방법 2: 원클릭 설치 스크립트 (CLI만)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gorillaKim/obsidian-nexus/master/install.sh | bash
@@ -37,7 +56,7 @@ curl -fsSL https://raw.githubusercontent.com/gorillaKim/obsidian-nexus/master/in
 
 ---
 
-### 방법 2: Desktop 앱 + CLI 수동 설치
+### 방법 3: Desktop 앱 + CLI 수동 설치
 
 #### Desktop 앱 (GUI)
 
@@ -72,7 +91,7 @@ curl -fsSL https://github.com/gorillaKim/obsidian-nexus/releases/latest/download
 
 ---
 
-### 방법 3: 소스에서 빌드
+### 방법 4: 소스에서 빌드
 
 **Prerequisites:** Rust 1.75+, Node.js 22+, pnpm
 

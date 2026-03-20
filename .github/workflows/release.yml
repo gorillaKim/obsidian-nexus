@@ -176,3 +176,15 @@ jobs:
             nexus-cli-darwin-aarch64.tar.gz.sha256
             nexus-cli-darwin-x86_64.tar.gz
             nexus-cli-darwin-x86_64.tar.gz.sha256
+
+  homebrew:
+    needs: [desktop, cli]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update Homebrew tap
+        env:
+          TAP_REPO_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
+        run: |
+          chmod +x scripts/update-homebrew-tap.sh
+          ./scripts/update-homebrew-tap.sh "${{ github.ref_name }}"
