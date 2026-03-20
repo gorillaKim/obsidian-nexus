@@ -43,7 +43,15 @@ curl -fsSL https://raw.githubusercontent.com/gorillaKim/obsidian-nexus/master/in
 
 1. [Releases 페이지](https://github.com/gorillaKim/obsidian-nexus/releases/latest)에서 `Obsidian-Nexus.dmg` 다운로드
 2. DMG 열기 → Applications 폴더로 드래그
-3. 첫 실행 시 Gatekeeper 경고가 뜨면: **우클릭 → 열기**
+3. 앱 실행
+
+**"앱이 손상되었습니다" 오류가 뜨면** (macOS Gatekeeper 미서명 차단):
+
+```bash
+xattr -cr /Applications/Obsidian\ Nexus.app
+```
+
+이후 앱을 다시 실행하면 정상 동작합니다.
 
 > Desktop 앱 안에 CLI와 MCP 서버가 내장되어 있습니다. CLI만 필요하면 스크립트 설치로 충분합니다.
 
