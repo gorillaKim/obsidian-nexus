@@ -35,6 +35,10 @@ jobs:
       - run: corepack enable && pnpm install --no-frozen-lockfile
         working-directory: apps/desktop
 
+      - name: Install sidecar dependencies
+        run: npm install --omit=dev
+        working-directory: apps/desktop/sidecar
+
       - name: Cache Tauri CLI
         uses: actions/cache@v4
         with:
