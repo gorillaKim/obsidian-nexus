@@ -18,7 +18,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: corepack enable && pnpm install
+
+      # Cache Rust build artifacts
+      - name: Cache Cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-desktop-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-desktop-
+
+      # Cache Tauri CLI
+      - name: Cache Tauri CLI
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: ${{ runner.os }}-tauri-cli-2
+
+      - run: corepack enable && pnpm install --no-frozen-lockfile
         working-directory: apps/desktop
 
       # Build sidecars for both architectures
@@ -45,9 +64,8 @@ jobs:
             apps/desktop/src-tauri/binaries/nexus-mcp-server-x86_64-apple-darwin \
             -output apps/desktop/src-tauri/binaries/nexus-mcp-server-universal-apple-darwin
 
-      # Build Tauri app directly (not via tauri-action)
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2"
+        run: which cargo-tauri || cargo install tauri-cli --version "^2"
 
       - name: Build Tauri universal binary
         working-directory: apps/desktop
@@ -128,7 +146,17 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      # Build for both architectures
+      # Cache Rust build artifacts
+      - name: Cache Cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-cli-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-cli-
+
       - name: Build aarch64
         run: |
           cargo build --release --target aarch64-apple-darwin -p nexus-cli -p nexus-mcp-server
