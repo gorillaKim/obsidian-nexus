@@ -1,13 +1,40 @@
 @import "tailwindcss";
 
 :root {
+  /* Surfaces */
   --bg-primary: #1a1b26;
-  --bg-secondary: #24283b;
+  --bg-secondary: #1e2030;
+  --bg-tertiary: #24283b;
+  --bg-hover: #292e42;
+
+  /* Text */
   --text-primary: #c0caf5;
   --text-secondary: #a9b1d6;
+  --text-tertiary: #565f89;
+
+  /* Accent */
   --accent: #7aa2f7;
   --accent-hover: #89b4fa;
-  --border: #3b4261;
+  --accent-muted: rgba(122, 162, 247, 0.15);
+
+  /* Semantic */
+  --success: #9ece6a;
+  --warning: #e0af68;
+  --danger: #f7768e;
+  --info: #7dcfff;
+
+  /* Borders */
+  --border: #2f3347;
+  --border-hover: #3b4261;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Layout */
+  --sidebar-width: 200px;
+  --sidebar-collapsed: 56px;
 }
 
 body {
@@ -15,10 +42,31 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background-color: var(--bg-primary);
   color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
 }
 
 /* Markdown renderer styles */
@@ -28,14 +76,43 @@ body {
 .prose p { margin: 0.5rem 0; line-height: 1.6; }
 .prose ul, .prose ol { margin: 0.5rem 0; padding-left: 1.5rem; }
 .prose li { margin: 0.25rem 0; }
-.prose code { background: var(--bg-primary); padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.85em; }
-.prose pre { background: var(--bg-primary); padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 0.75rem 0; }
+.prose code { background: var(--bg-tertiary); padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.85em; }
+.prose pre { background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 0.75rem 0; border: 1px solid var(--border); }
 .prose pre code { background: none; padding: 0; }
 .prose table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; }
 .prose th, .prose td { border: 1px solid var(--border); padding: 0.5rem; text-align: left; font-size: 0.85rem; }
-.prose th { background: var(--bg-primary); }
+.prose th { background: var(--bg-tertiary); }
 .prose a { color: var(--accent); text-decoration: none; }
 .prose a:hover { text-decoration: underline; }
 .prose blockquote { border-left: 3px solid var(--accent); padding-left: 1rem; opacity: 0.8; margin: 0.75rem 0; }
 .prose hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 .prose img { max-width: 100%; border-radius: 8px; }
+
+/* Range input styling */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg-primary);
+}
+
+input[type="range"]:disabled {
+  opacity: 0.3;
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb {
+  cursor: not-allowed;
+}
