@@ -13,7 +13,7 @@ Agent-friendly knowledge search engine for Obsidian vaults.
 - **Desktop 앱** — Tauri v2 기반 GUI (검색, 프로젝트 관리, 자동 업데이트)
 - **CLI** — 터미널에서 인덱싱, 검색, 볼트 관리
 - **Alias 검색** — 한글 별칭으로 영문 문서 검색 (예: "데이터독" → datadog-setup.md)
-- **자동 업데이트** — Desktop은 Tauri updater, CLI는 `nexus update`
+- **자동 업데이트** — Desktop은 Tauri updater, CLI는 `obs-nexus update`
 
 ---
 
@@ -92,11 +92,11 @@ cd obsidian-nexus
 
 # CLI + MCP 서버 빌드
 cargo build --release -p nexus-cli -p nexus-mcp-server
-cp target/release/nexus ~/.local/bin/
+cp target/release/obs-nexus ~/.local/bin/
 cp target/release/nexus-mcp-server ~/.local/bin/
 
 # Desktop 앱 빌드 (선택)
-cd apps/desktop && pnpm install && pnpm tauri:build
+cd apps/desktop && pnpm install && cargo tauri build
 ```
 
 ---

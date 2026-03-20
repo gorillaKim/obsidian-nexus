@@ -42,13 +42,15 @@ if [ "${1:-}" = "--build" ]; then
 fi
 
 # Copy with target triple suffix
-for BIN in nexus nexus-mcp-server; do
-  SRC="$TARGET_DIR/$BIN"
+for BIN in obs-nexus nexus-mcp-server; do
+  # obs-nexus binary is built as 'nexus' in target dir
+  SRC_NAME="${BIN/obs-nexus/nexus}"
+  SRC="$TARGET_DIR/$SRC_NAME"
   DST="$BINARIES_DIR/${BIN}-${TRIPLE}"
   if [ -f "$SRC" ]; then
     cp "$SRC" "$DST"
     chmod +x "$DST"
-    echo "Copied: $BIN -> $(basename "$DST")"
+    echo "Copied: $SRC_NAME -> $(basename "$DST")"
   else
     echo "WARNING: $SRC not found. Run with --build or build manually first." >&2
   fi

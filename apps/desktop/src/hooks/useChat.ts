@@ -140,14 +140,28 @@ export function useChat(options: UseChatOptions = {}) {
       setSessions(list);
       // 세션이 있고 아직 선택된 것이 없으면 첫 번째 자동 선택
       if (list.length > 0 && !activeSessionId) {
-        setActiveSessionId(list[0].id);
+        const first = list[0];
+        setActiveSessionId(first.id);
+        // 앱 재시작 후 복원된 세션은 sidecar에 등록되어 있지 않으므로 start 요청 전송
+        try {
+          await invoke("chat_start_session", {
+            sessionId: first.id,
+            model: first.model,
+            projectName: options.projectName || "default",
+            projectPath: options.projectPath || "",
+            docCount: options.docCount || 0,
+            topTags: options.topTags || [],
+          });
+        } catch {
+          // best-effort: 이미 실행 중이거나 sidecar 미실행 상태
+        }
       }
       return list;
     } catch (e) {
       setError(String(e));
       return [];
     }
-  }, []);
+  }, [options]);
 
   const createSession = useCallback(
     async (cli: string, model: string, projectId: string, name?: string) => {
@@ -219,12 +233,27 @@ export function useChat(options: UseChatOptions = {}) {
     []
   );
 
-  const switchSession = useCallback((sessionId: string) => {
+  const switchSession = useCallback(async (sessionId: string, session?: SessionMeta) => {
     setActiveSessionId(sessionId);
     setStatus("idle");
     setError(null);
     setToolInfo(null);
-  }, []);
+    // 세션 전환 시 sidecar에 start 요청 (이미 등록되어 있으면 무시됨)
+    if (session) {
+      try {
+        await invoke("chat_start_session", {
+          sessionId,
+          model: session.model,
+          projectName: options.projectName || "default",
+          projectPath: options.projectPath || "",
+          docCount: options.docCount || 0,
+          topTags: options.topTags || [],
+        });
+      } catch {
+        // best-effort
+      }
+    }
+  }, [options]);
 
   const sendMessage = useCallback(
     async (content: string) => {
