@@ -27,3 +27,4 @@ Thumbs.db
 # Claude Code
 .claude/
 .serena/
+apps/desktop/package-lock.json
