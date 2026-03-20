@@ -34,6 +34,17 @@ jobs:
           cp target/x86_64-apple-darwin/release/nexus apps/desktop/src-tauri/binaries/nexus-x86_64-apple-darwin
           cp target/x86_64-apple-darwin/release/nexus-mcp-server apps/desktop/src-tauri/binaries/nexus-mcp-server-x86_64-apple-darwin
 
+      - name: Create universal sidecars
+        run: |
+          lipo -create \
+            apps/desktop/src-tauri/binaries/nexus-aarch64-apple-darwin \
+            apps/desktop/src-tauri/binaries/nexus-x86_64-apple-darwin \
+            -output apps/desktop/src-tauri/binaries/nexus-universal-apple-darwin
+          lipo -create \
+            apps/desktop/src-tauri/binaries/nexus-mcp-server-aarch64-apple-darwin \
+            apps/desktop/src-tauri/binaries/nexus-mcp-server-x86_64-apple-darwin \
+            -output apps/desktop/src-tauri/binaries/nexus-mcp-server-universal-apple-darwin
+
       # Build Tauri app directly (not via tauri-action)
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2"
