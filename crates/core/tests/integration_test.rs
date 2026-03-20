@@ -159,20 +159,20 @@ fn test_full_pipeline_project_to_search() {
     assert_eq!(report.skipped, 0); // .obsidian should not count as skipped .md
 
     // 3. FTS5 search — Korean
-    let results = search::fts_search(&pool, "소유권", Some(&proj.id), 10)
+    let results = search::fts_search(&pool, "소유권", Some(&proj.id), 10, None)
         .expect("FTS search failed");
     assert!(!results.is_empty(), "Should find '소유권'");
     assert!(results[0].file_path.contains("rust-guide.md"));
     assert!(results[0].heading_path.as_ref().unwrap().contains("Ownership"));
 
     // 4. FTS5 search — English word
-    let results = search::fts_search(&pool, "Authentication", Some(&proj.id), 10)
+    let results = search::fts_search(&pool, "Authentication", Some(&proj.id), 10, None)
         .expect("Search failed");
     assert!(!results.is_empty(), "Should find 'Authentication'");
     assert!(results[0].file_path.contains("security-notes.md"));
 
     // 5. Search without project filter (cross-project)
-    let results = search::fts_search(&pool, "Decorators", None, 10)
+    let results = search::fts_search(&pool, "Decorators", None, 10, None)
         .expect("Cross-project search failed");
     assert!(!results.is_empty(), "Should find 'Decorators' across projects");
 
@@ -237,7 +237,7 @@ fn test_incremental_indexing() {
     assert_eq!(r3.unchanged, 3);
 
     // Search for new content
-    let results = search::fts_search(&pool, "async", Some(&proj.id), 10).unwrap();
+    let results = search::fts_search(&pool, "async", Some(&proj.id), 10, None).unwrap();
     assert!(!results.is_empty(), "Should find updated content");
 }
 
@@ -314,7 +314,7 @@ fn test_subfolder_indexed() {
     assert!(docs.iter().any(|d| d.file_path.contains("daily/")));
 
     // Search in subfolder content
-    let results = search::fts_search(&pool, "subfolder", Some(&proj.id), 10).unwrap();
+    let results = search::fts_search(&pool, "subfolder", Some(&proj.id), 10, None).unwrap();
     // The daily note may not contain "subfolder", so just verify the doc exists
     assert!(docs.iter().any(|d| d.file_path.starts_with("daily/")));
 }
@@ -327,7 +327,7 @@ fn test_search_snippet_and_heading() {
     index_engine::index_project(&pool, &proj.id, false).unwrap();
 
     // Use a word that's definitely in chunk content (heading_path is also indexed in FTS5)
-    let results = search::fts_search(&pool, "Borrowing", Some(&proj.id), 10).unwrap();
+    let results = search::fts_search(&pool, "Borrowing", Some(&proj.id), 10, None).unwrap();
     assert!(!results.is_empty(), "Should find 'Borrowing'");
 
     let r = &results[0];
@@ -338,7 +338,7 @@ fn test_search_snippet_and_heading() {
 #[test]
 fn test_empty_query_returns_empty() {
     let (pool, _vault) = setup();
-    let results = search::fts_search(&pool, "", None, 10).unwrap();
+    let results = search::fts_search(&pool, "", None, 10, None).unwrap();
     assert!(results.is_empty());
 }
 
@@ -358,4 +358,104 @@ fn test_config_defaults() {
     assert_eq!(config.search.default_limit, 20);
     assert!(config.is_excluded(std::path::Path::new(".obsidian/plugins")));
     assert!(!config.is_excluded(std::path::Path::new("notes/hello.md")));
+}
+
+#[test]
+fn test_tag_prefilter_fts_or_mode() {
+    let (pool, vault) = setup();
+    let proj = project::add_project(&pool, "tag-or-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    let tf = search::TagFilter::new(vec!["rust".to_string()], false);
+    let results = search::fts_search(&pool, "소유권 Authentication Decorators", Some(&proj.id), 10, Some(&tf)).unwrap();
+    // Only rust-tagged document should appear
+    assert!(!results.is_empty(), "Should find results with rust tag");
+    assert!(results.iter().all(|r| r.file_path.contains("rust-guide.md")),
+        "All results should be from rust-guide.md");
+}
+
+#[test]
+fn test_tag_prefilter_empty_when_no_match() {
+    let (pool, vault) = setup();
+    let proj = project::add_project(&pool, "tag-empty-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    let tf = search::TagFilter::new(vec!["nonexistent-tag".to_string()], false);
+    let results = search::fts_search(&pool, "소유권", Some(&proj.id), 10, Some(&tf)).unwrap();
+    assert!(results.is_empty(), "Should return empty for non-existent tag");
+}
+
+#[test]
+fn test_tag_prefilter_and_mode() {
+    let (pool, vault) = setup();
+    let proj = project::add_project(&pool, "tag-and-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    // rust-guide.md has tags: rust, programming
+    // AND mode: both tags must match
+    let tf = search::TagFilter::new(vec!["rust".to_string(), "programming".to_string()], true);
+    let results = search::fts_search(&pool, "소유권", Some(&proj.id), 10, Some(&tf)).unwrap();
+    assert!(!results.is_empty(), "Should find results with both rust AND programming tags");
+
+    // AND mode with impossible combination
+    let tf2 = search::TagFilter::new(vec!["rust".to_string(), "python".to_string()], true);
+    let results2 = search::fts_search(&pool, "소유권", Some(&proj.id), 10, Some(&tf2)).unwrap();
+    assert!(results2.is_empty(), "No document has both rust AND python tags");
+}
+
+#[test]
+fn test_tag_prefilter_excludes_alias_match() {
+    let pool = test_pool();
+    let vault = TempDir::new().expect("Failed to create temp dir");
+
+    // Document with alias "mcp-guide" but only tagged "devops" (no "mcp" tag)
+    fs::write(
+        vault.path().join("infra-setup.md"),
+        r#"---
+title: Infra Setup
+aliases:
+  - mcp-guide
+tags:
+  - devops
+---
+
+# Infra Setup
+
+Infrastructure setup and configuration guide.
+"#,
+    )
+    .unwrap();
+
+    // Document with "mcp" tag
+    fs::write(
+        vault.path().join("mcp-server.md"),
+        r#"---
+title: MCP Server
+tags:
+  - mcp
+  - programming
+---
+
+# MCP Server
+
+MCP server implementation details.
+"#,
+    )
+    .unwrap();
+
+    let proj = project::add_project(&pool, "alias-tag-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    // Search "mcp-guide" with tag filter ["mcp"]
+    // infra-setup.md has alias "mcp-guide" but no "mcp" tag — should be excluded
+    let tf = search::TagFilter::new(vec!["mcp".to_string()], false);
+    let results = search::fts_search(&pool, "mcp-guide", Some(&proj.id), 10, Some(&tf)).unwrap();
+
+    // All results must have the "mcp" tag — alias match without tag must be excluded
+    for r in &results {
+        assert!(
+            !r.file_path.contains("infra-setup.md"),
+            "infra-setup.md should be excluded by tag filter despite alias match"
+        );
+    }
 }

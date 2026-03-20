@@ -23,12 +23,94 @@ pub struct SearchResult {
     pub last_modified: Option<String>,
 }
 
+/// DB 레벨 태그 사전 필터.
+/// tags가 비어있으면 필터 없음.
+#[derive(Debug, Clone, Default)]
+pub struct TagFilter {
+    pub tags: Vec<String>,
+    pub match_all: bool,
+}
+
+impl TagFilter {
+    pub fn new(tags: Vec<String>, match_all: bool) -> Self {
+        Self { tags, match_all }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.tags.is_empty()
+    }
+}
+
+/// 태그 이름 목록으로 매칭 document_id 조회.
+fn get_document_ids_by_tags(
+    conn: &rusqlite::Connection,
+    tags: &[String],
+    project_id: Option<&str>,
+    match_all: bool,
+) -> Result<Option<Vec<String>>> {
+    if tags.is_empty() {
+        return Ok(None);
+    }
+
+    // Dedup 전에 소문자 변환 — "Rust"와 "rust"가 동일하게 처리되어야 함
+    let mut lower_tags: Vec<String> = tags.iter().map(|t| t.to_lowercase()).collect();
+    lower_tags.sort();
+    lower_tags.dedup();
+    let placeholders = lower_tags.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+
+    let having_clause = if match_all {
+        format!("HAVING COUNT(DISTINCT t.id) >= {}", lower_tags.len())
+    } else {
+        String::new()
+    };
+
+    let sql = if project_id.is_some() {
+        format!(
+            "SELECT dt.document_id
+             FROM document_tags dt
+             JOIN tags t ON dt.tag_id = t.id
+             JOIN documents d ON dt.document_id = d.id
+             WHERE LOWER(t.name) IN ({ph}) AND d.project_id = ?
+             GROUP BY dt.document_id
+             {having}",
+            ph = placeholders,
+            having = having_clause
+        )
+    } else {
+        format!(
+            "SELECT dt.document_id
+             FROM document_tags dt
+             JOIN tags t ON dt.tag_id = t.id
+             WHERE LOWER(t.name) IN ({ph})
+             GROUP BY dt.document_id
+             {having}",
+            ph = placeholders,
+            having = having_clause
+        )
+    };
+
+    let mut params_boxed: Vec<Box<dyn rusqlite::types::ToSql>> =
+        lower_tags.iter().map(|t| Box::new(t.clone()) as Box<dyn rusqlite::types::ToSql>).collect();
+    if let Some(pid) = project_id {
+        params_boxed.push(Box::new(pid.to_string()));
+    }
+
+    let mut stmt = conn.prepare(&sql)?;
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params_boxed.iter().map(|b| b.as_ref()).collect();
+    let ids = stmt
+        .query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok(Some(ids))
+}
+
 /// FTS5 keyword search
 pub fn fts_search(
     pool: &DbPool,
     query: &str,
     project_id: Option<&str>,
     limit: usize,
+    tag_filter: Option<&TagFilter>,
 ) -> Result<Vec<SearchResult>> {
     let conn = pool.get()?;
 
@@ -36,6 +118,20 @@ pub fn fts_search(
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
+
+    // 태그 사전 필터
+    let tag_doc_ids: Option<Vec<String>> = if let Some(tf) = tag_filter {
+        if !tf.is_empty() {
+            match get_document_ids_by_tags(&conn, &tf.tags, project_id, tf.match_all)? {
+                Some(ids) if ids.is_empty() => return Ok(vec![]),
+                other => other,
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     // Sanitize FTS5 query: short queries use prefix matching, longer ones use phrase matching
     // Also split underscored terms (wiki_links → "wiki_links" OR "wiki" OR "links")
@@ -74,43 +170,63 @@ pub fn fts_search(
         parts.join(" OR ")
     };
 
-    let sql = if project_id.is_some() {
-        "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
-                snippet(chunks_fts, 0, '<b>', '</b>', '...', 64) as snippet,
-                rank
-         FROM chunks_fts
-         JOIN chunks c ON chunks_fts.rowid = c.rowid
-         JOIN documents d ON c.document_id = d.id
-         JOIN projects p ON d.project_id = p.id
-         WHERE chunks_fts MATCH ?1
-         AND d.project_id = ?2
-         ORDER BY rank
-         LIMIT ?3"
-    } else {
-        "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
-                snippet(chunks_fts, 0, '<b>', '</b>', '...', 64) as snippet,
-                rank
-         FROM chunks_fts
-         JOIN chunks c ON chunks_fts.rowid = c.rowid
-         JOIN documents d ON c.document_id = d.id
-         JOIN projects p ON d.project_id = p.id
-         WHERE chunks_fts MATCH ?1
-         ORDER BY rank
-         LIMIT ?2"
+    // Build dynamic SQL with optional project and tag filters
+    let tag_in_clause = tag_doc_ids.as_ref().map(|ids| {
+        let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        format!("AND c.document_id IN ({})", ph)
+    });
+
+    let sql = {
+        let mut s = String::from(
+            "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
+                    snippet(chunks_fts, 0, '<b>', '</b>', '...', 64) as snippet,
+                    rank
+             FROM chunks_fts
+             JOIN chunks c ON chunks_fts.rowid = c.rowid
+             JOIN documents d ON c.document_id = d.id
+             JOIN projects p ON d.project_id = p.id
+             WHERE chunks_fts MATCH ?"
+        );
+        if project_id.is_some() {
+            s.push_str(" AND d.project_id = ?");
+        }
+        if let Some(ref clause) = tag_in_clause {
+            s.push(' ');
+            s.push_str(clause);
+        }
+        s.push_str(" ORDER BY rank LIMIT ?");
+        s
     };
 
-    let mut stmt = conn.prepare(sql)?;
+    let mut params_boxed: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    params_boxed.push(Box::new(safe_query.clone()));
+    if let Some(pid) = project_id {
+        params_boxed.push(Box::new(pid.to_string()));
+    }
+    if let Some(ref ids) = tag_doc_ids {
+        for id in ids {
+            params_boxed.push(Box::new(id.clone()));
+        }
+    }
+    params_boxed.push(Box::new(limit as i64));
 
-    let results = if let Some(pid) = project_id {
-        let rows = stmt.query_map(params![safe_query, pid, limit as i64], map_result)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()?
-    } else {
-        let rows = stmt.query_map(params![safe_query, limit as i64], map_result)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params_boxed.iter().map(|b| b.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let results = stmt.query_map(param_refs.as_slice(), map_result)?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    // Always resolve aliases and merge to front, but respect tag filter
+    let alias_results = {
+        let raw = resolve_alias_results(&conn, trimmed, project_id, limit);
+        if let Some(ref ids) = tag_doc_ids {
+            raw.into_iter()
+                .filter(|r| ids.contains(&r.document_id))
+                .collect()
+        } else {
+            raw
+        }
     };
-
-    // Always resolve aliases and merge to front
-    let alias_results = resolve_alias_results(&conn, trimmed, project_id, limit);
     let results = merge_alias_results(alias_results, results, limit);
 
     Ok(results)
@@ -322,6 +438,7 @@ pub fn vector_search(
     project_id: Option<&str>,
     limit: usize,
     config: &crate::config::Config,
+    tag_filter: Option<&TagFilter>,
 ) -> Result<Vec<SearchResult>> {
     // Generate and normalize query embedding
     let mut query_embedding = crate::embedding::embed_text(config, query)?;
@@ -330,8 +447,29 @@ pub fn vector_search(
 
     let conn = pool.get()?;
 
-    // sqlite-vec KNN: fetch top-K*2 candidates, then filter by project if needed
-    let fetch_limit = if project_id.is_some() { limit * 3 } else { limit };
+    // 태그 사전 필터
+    let tag_id_set: Option<std::collections::HashSet<String>> = if let Some(tf) = tag_filter {
+        if !tf.is_empty() {
+            match get_document_ids_by_tags(&conn, &tf.tags, project_id, tf.match_all)? {
+                Some(ids) if ids.is_empty() => return Ok(vec![]),
+                Some(ids) => Some(ids.into_iter().collect()),
+                None => None,
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // sqlite-vec KNN: fetch top-K*N candidates, then filter
+    let fetch_limit = if tag_id_set.is_some() {
+        limit * 5
+    } else if project_id.is_some() {
+        limit * 3
+    } else {
+        limit
+    };
 
     let sql = "SELECT v.chunk_id, v.distance, c.document_id, d.file_path, p.name,
                       c.heading_path, c.content, d.project_id
@@ -365,6 +503,13 @@ pub fn vector_search(
         // Filter by project if specified
         if let Some(filter_pid) = project_id {
             if pid != filter_pid {
+                continue;
+            }
+        }
+
+        // Filter by tag pre-filter
+        if let Some(ref id_set) = tag_id_set {
+            if !id_set.contains(&doc_id) {
                 continue;
             }
         }
@@ -411,6 +556,7 @@ pub fn hybrid_search(
     project_id: Option<&str>,
     limit: usize,
     config: &crate::config::Config,
+    tag_filter: Option<&TagFilter>,
 ) -> Result<Vec<SearchResult>> {
     // Dynamic weight: short queries lean toward keyword, long queries use configured weight
     let char_count = query.trim().chars().count();
@@ -423,10 +569,10 @@ pub fn hybrid_search(
     };
 
     // Get keyword results
-    let keyword_results = fts_search(pool, query, project_id, limit * 2)?;
+    let keyword_results = fts_search(pool, query, project_id, limit * 2, tag_filter)?;
 
     // Get vector results (may fail if Ollama is not running)
-    let vector_results = match vector_search(pool, query, project_id, limit * 2, config) {
+    let vector_results = match vector_search(pool, query, project_id, limit * 2, config, tag_filter) {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("Vector search failed, falling back to keyword only: {}", e);
@@ -591,9 +737,9 @@ pub fn enrich_results(
     Ok(())
 }
 
-/// Filter search results by tags (post-enrich).
-/// When `match_all` is false (OR): keeps results that have ANY of the specified tags.
-/// When `match_all` is true (AND): keeps results that have ALL of the specified tags.
+/// Deprecated: 태그 필터링은 이제 검색 함수의 `tag_filter` 파라미터로 DB 레벨에서 수행됩니다.
+/// 이 함수는 하위 호환성을 위해 유지됩니다.
+#[deprecated(note = "Use tag_filter parameter in search functions instead")]
 pub fn filter_by_tags(results: &mut Vec<SearchResult>, tags: &[&str], match_all: bool) {
     if tags.is_empty() { return; }
     results.retain(|r| {
@@ -758,7 +904,7 @@ mod tests {
         let pool = test_pool();
         let proj = setup_indexed_project(&pool);
 
-        let results = fts_search(&pool, "rust", Some(&proj.id), 10).unwrap();
+        let results = fts_search(&pool, "rust", Some(&proj.id), 10, None).unwrap();
         assert!(!results.is_empty(), "Should find 'rust' in indexed docs");
         assert!(results.iter().any(|r| r.file_path.contains("note1.md")));
     }
@@ -768,7 +914,7 @@ mod tests {
         let pool = test_pool();
         let proj = setup_indexed_project(&pool);
 
-        let results = fts_search(&pool, "한국어", Some(&proj.id), 10).unwrap();
+        let results = fts_search(&pool, "한국어", Some(&proj.id), 10, None).unwrap();
         assert!(!results.is_empty(), "Should find Korean text");
         assert!(results.iter().any(|r| r.file_path.contains("korean.md")));
     }
@@ -778,14 +924,14 @@ mod tests {
         let pool = test_pool();
         let proj = setup_indexed_project(&pool);
 
-        let results = fts_search(&pool, "xyznonexistent", Some(&proj.id), 10).unwrap();
+        let results = fts_search(&pool, "xyznonexistent", Some(&proj.id), 10, None).unwrap();
         assert!(results.is_empty());
     }
 
     #[test]
     fn test_fts_search_empty_query() {
         let pool = test_pool();
-        let results = fts_search(&pool, "", None, 10).unwrap();
+        let results = fts_search(&pool, "", None, 10, None).unwrap();
         assert!(results.is_empty());
     }
 
@@ -795,7 +941,7 @@ mod tests {
         let _proj = setup_indexed_project(&pool);
 
         // Search without project filter
-        let results = fts_search(&pool, "programming", None, 10).unwrap();
+        let results = fts_search(&pool, "programming", None, 10, None).unwrap();
         assert!(!results.is_empty());
     }
 
@@ -804,7 +950,7 @@ mod tests {
         let pool = test_pool();
         let proj = setup_indexed_project(&pool);
 
-        let results = fts_search(&pool, "ownership", Some(&proj.id), 10).unwrap();
+        let results = fts_search(&pool, "ownership", Some(&proj.id), 10, None).unwrap();
         assert!(!results.is_empty());
         assert!(!results[0].snippet.is_empty(), "Snippet should not be empty");
     }
@@ -814,7 +960,7 @@ mod tests {
         let pool = test_pool();
         let proj = setup_indexed_project(&pool);
 
-        let results = fts_search(&pool, "ownership", Some(&proj.id), 10).unwrap();
+        let results = fts_search(&pool, "ownership", Some(&proj.id), 10, None).unwrap();
         assert!(!results.is_empty());
         assert!(results[0].heading_path.is_some(), "Should have heading path");
     }
@@ -824,7 +970,7 @@ mod tests {
         let pool = test_pool();
         let proj = setup_indexed_project(&pool);
 
-        let results = fts_search(&pool, "note", Some(&proj.id), 1).unwrap();
+        let results = fts_search(&pool, "note", Some(&proj.id), 1, None).unwrap();
         assert!(results.len() <= 1);
     }
 
@@ -884,7 +1030,7 @@ mod tests {
         let _proj = setup_indexed_project(&pool);
 
         // FTS5 special operators should be safely handled
-        let results = fts_search(&pool, "content:password OR heading_path:secret", None, 10).unwrap();
+        let results = fts_search(&pool, "content:password OR heading_path:secret", None, 10, None).unwrap();
         // Should not crash, may return empty
         let _ = results;
     }

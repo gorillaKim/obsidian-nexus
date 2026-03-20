@@ -53,26 +53,31 @@ fn search_documents(
     let mode = mode.as_deref().unwrap_or("hybrid");
     let use_popularity = project_id.is_some();
 
+    let tag_filter = tags.as_ref().and_then(|tag_list| {
+        if tag_list.is_empty() { None }
+        else {
+            Some(nexus_core::search::TagFilter::new(
+                tag_list.clone(),
+                tag_match_all.unwrap_or(false),
+            ))
+        }
+    });
+
     let mut results = match mode {
         "keyword" => nexus_core::search::fts_search(
-            &state.pool, &query, resolved_pid.as_deref(), limit,
+            &state.pool, &query, resolved_pid.as_deref(), limit, tag_filter.as_ref(),
         ).map_err(|e| e.to_string())?,
         "vector" => nexus_core::search::vector_search(
-            &state.pool, &query, resolved_pid.as_deref(), limit, &config,
+            &state.pool, &query, resolved_pid.as_deref(), limit, &config, tag_filter.as_ref(),
         ).map_err(|e| e.to_string())?,
         _ => nexus_core::search::hybrid_search(
-            &state.pool, &query, resolved_pid.as_deref(), limit, &config,
+            &state.pool, &query, resolved_pid.as_deref(), limit, &config, tag_filter.as_ref(),
         ).map_err(|e| e.to_string())?,
     };
 
-    // Enrich with metadata + apply tag filter
+    // Enrich with metadata
     nexus_core::search::enrich_results(&state.pool, &mut results, use_popularity)
         .map_err(|e| e.to_string())?;
-
-    if let Some(ref tag_list) = tags {
-        let tag_refs: Vec<&str> = tag_list.iter().map(|s| s.as_str()).collect();
-        nexus_core::search::filter_by_tags(&mut results, &tag_refs, tag_match_all.unwrap_or(false));
-    }
 
     Ok(results)
 }

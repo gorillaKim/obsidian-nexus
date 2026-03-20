@@ -20,15 +20,15 @@ pub fn handle_search(
     let results = match mode {
         "vector" => {
             let config = nexus_core::Config::load()?;
-            nexus_core::search::vector_search(pool, query, resolved_pid.as_deref(), limit, &config)?
+            nexus_core::search::vector_search(pool, query, resolved_pid.as_deref(), limit, &config, None)?
         }
         "hybrid" => {
             let config = nexus_core::Config::load()?;
-            nexus_core::search::hybrid_search(pool, query, resolved_pid.as_deref(), limit, &config)?
+            nexus_core::search::hybrid_search(pool, query, resolved_pid.as_deref(), limit, &config, None)?
         }
         _ => {
             // "keyword" or default
-            nexus_core::search::fts_search(pool, query, resolved_pid.as_deref(), limit)?
+            nexus_core::search::fts_search(pool, query, resolved_pid.as_deref(), limit, None)?
         }
     };
 

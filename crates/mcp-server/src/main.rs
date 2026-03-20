@@ -330,28 +330,31 @@ fn tool_search(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::resu
         None
     };
 
+    // 태그 필터 준비 (검색 전)
+    let tag_strings: Vec<String> = args.get("tags")
+        .and_then(|t| t.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    let match_all = args.get("tag_match_all").and_then(|v| v.as_bool()).unwrap_or(false);
+    let tag_filter = if tag_strings.is_empty() {
+        None
+    } else {
+        Some(nexus_core::search::TagFilter::new(tag_strings, match_all))
+    };
+
     let config = nexus_core::Config::load().unwrap_or_default();
     let mut results = match mode {
-        "keyword" => nexus_core::search::fts_search(pool, query, resolved_pid.as_deref(), limit)
+        "keyword" => nexus_core::search::fts_search(pool, query, resolved_pid.as_deref(), limit, tag_filter.as_ref())
             .map_err(|e| e.to_string())?,
-        "vector" => nexus_core::search::vector_search(pool, query, resolved_pid.as_deref(), limit, &config)
+        "vector" => nexus_core::search::vector_search(pool, query, resolved_pid.as_deref(), limit, &config, tag_filter.as_ref())
             .map_err(|e| e.to_string())?,
-        _ => nexus_core::search::hybrid_search(pool, query, resolved_pid.as_deref(), limit, &config)
+        _ => nexus_core::search::hybrid_search(pool, query, resolved_pid.as_deref(), limit, &config, tag_filter.as_ref())
             .map_err(|e| e.to_string())?,
     };
 
     if enrich {
         nexus_core::search::enrich_results(pool, &mut results, use_popularity)
             .map_err(|e| e.to_string())?;
-    }
-
-    // Optional tag filtering (requires enrich=true for tags to be populated)
-    if let Some(tags_val) = args.get("tags").and_then(|t| t.as_array()) {
-        let tags: Vec<&str> = tags_val.iter().filter_map(|v| v.as_str()).collect();
-        if !tags.is_empty() {
-            let match_all = args.get("tag_match_all").and_then(|v| v.as_bool()).unwrap_or(false);
-            nexus_core::search::filter_by_tags(&mut results, &tags, match_all);
-        }
     }
 
     serde_json::to_string_pretty(&results).map_err(|e| e.to_string())
