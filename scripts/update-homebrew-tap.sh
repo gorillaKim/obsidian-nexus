@@ -39,9 +39,9 @@ TAP_DIR="${TMP}/homebrew-nexus"
 git clone "https://x-access-token:${TAP_REPO_TOKEN}@github.com/${TAP_REPO}.git" "$TAP_DIR"
 mkdir -p "${TAP_DIR}/Formula" "${TAP_DIR}/Casks"
 
-# ── Formula/nexus.rb 생성 ─────────────────────────────────────────────────────
-cat > "${TAP_DIR}/Formula/nexus.rb" <<FORMULA
-class Nexus < Formula
+# ── Formula/obsidian-nexus.rb 생성 ───────────────────────────────────────────
+cat > "${TAP_DIR}/Formula/obsidian-nexus.rb" <<FORMULA
+class ObsidianNexus < Formula
   desc "Agent-friendly knowledge search engine for Obsidian vaults (CLI)"
   homepage "https://github.com/gorillaKim/obsidian-nexus"
   version "${VERSION}"
@@ -105,7 +105,7 @@ CASK
 cd "$TAP_DIR"
 git config user.name  "github-actions[bot]"
 git config user.email "github-actions[bot]@users.noreply.github.com"
-git add Formula/nexus.rb Casks/obsidian-nexus.rb
+git add Formula/obsidian-nexus.rb Casks/obsidian-nexus.rb
 git commit -m "chore: bump to ${TAG}"
 git push
 

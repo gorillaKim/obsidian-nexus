@@ -24,13 +24,13 @@ Agent-friendly knowledge search engine for Obsidian vaults.
 ```bash
 # 탭 등록 + 설치 (한 번만)
 brew tap gorillakim/nexus
-brew install nexus                    # CLI + MCP 서버
+brew install obsidian-nexus           # CLI + MCP 서버
 brew install --cask obsidian-nexus   # Desktop 앱
 ```
 
 업데이트:
 ```bash
-brew upgrade nexus
+brew upgrade obsidian-nexus
 brew upgrade --cask obsidian-nexus
 ```
 
