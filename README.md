@@ -19,46 +19,40 @@ Agent-friendly knowledge search engine for Obsidian vaults.
 
 ## Installation
 
-### 방법 1: Homebrew (권장)
-
-```bash
-# 탭 등록 + 설치 (한 번만)
-brew tap gorillakim/nexus
-brew install obsidian-nexus           # CLI + MCP 서버
-brew install --cask obsidian-nexus   # Desktop 앱
-```
-
-업데이트:
-```bash
-brew upgrade obsidian-nexus
-brew upgrade --cask obsidian-nexus
-```
-
-> Homebrew가 없다면: [brew.sh](https://brew.sh) — `xcode-select --install && /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
-
----
-
-### 방법 2: 원클릭 설치 스크립트 (CLI만)
+### 방법 1: curl 스크립트 (권장 — CLI + MCP 서버)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gorillaKim/obsidian-nexus/master/install.sh | bash
 ```
 
-스크립트가 자동으로 처리하는 것:
-- 아키텍처 감지 (Apple Silicon / Intel)
-- 최신 릴리즈 버전 확인
-- `nexus` + `nexus-mcp-server` 바이너리 다운로드
+- 아키텍처 자동 감지 (Apple Silicon / Intel)
+- `obs-nexus` + `nexus-mcp-server` → `~/.local/bin` 설치
 - SHA256 체크섬 검증
-- `~/.local/bin`에 설치
-- PATH 설정 안내
+- PATH 자동 설정
 
-> 설치 디렉토리를 바꾸려면: `NEXUS_INSTALL_DIR=/usr/local/bin curl -fsSL ... | bash`
+> 설치 디렉토리 변경: `NEXUS_INSTALL_DIR=/usr/local/bin curl -fsSL ... | bash`
 
 ---
 
-### 방법 3: Desktop 앱 + CLI 수동 설치
+### 방법 2: Homebrew
 
-#### Desktop 앱 (GUI)
+> macOS Command Line Tools 최신 버전 필요. `xcode-select --install` 으로 설치.
+
+```bash
+brew tap gorillakim/nexus
+brew install --formula gorillakim/nexus/obsidian-nexus   # CLI + MCP 서버
+brew install --cask gorillakim/nexus/obsidian-nexus      # Desktop 앱
+```
+
+업데이트:
+```bash
+brew upgrade --formula gorillakim/nexus/obsidian-nexus
+brew upgrade --cask gorillakim/nexus/obsidian-nexus
+```
+
+---
+
+### 방법 3: Desktop 앱 수동 설치
 
 1. [Releases 페이지](https://github.com/gorillaKim/obsidian-nexus/releases/latest)에서 `Obsidian-Nexus.dmg` 다운로드
 2. DMG 열기 → Applications 폴더로 드래그
@@ -70,16 +64,13 @@ curl -fsSL https://raw.githubusercontent.com/gorillaKim/obsidian-nexus/master/in
 xattr -cr /Applications/Obsidian\ Nexus.app
 ```
 
-이후 앱을 다시 실행하면 정상 동작합니다.
+> Desktop 앱 안에 CLI와 MCP 서버가 내장되어 있습니다. CLI만 필요하면 방법 1로 충분합니다.
 
-> Desktop 앱 안에 CLI와 MCP 서버가 내장되어 있습니다. CLI만 필요하면 스크립트 설치로 충분합니다.
+---
 
-#### CLI 수동 설치
+### 방법 4: CLI 수동 설치
 
 ```bash
-# 아키텍처 확인
-uname -m   # arm64 = Apple Silicon, x86_64 = Intel
-
 # Apple Silicon
 curl -fsSL https://github.com/gorillaKim/obsidian-nexus/releases/latest/download/nexus-cli-darwin-aarch64.tar.gz \
   | tar xz -C ~/.local/bin
@@ -91,7 +82,7 @@ curl -fsSL https://github.com/gorillaKim/obsidian-nexus/releases/latest/download
 
 ---
 
-### 방법 4: 소스에서 빌드
+### 방법 5: 소스에서 빌드
 
 **Prerequisites:** Rust 1.75+, Node.js 22+, pnpm
 
