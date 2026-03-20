@@ -31,3 +31,7 @@ Thumbs.db
 # MCP config (contains local absolute paths)
 .mcp.json
 apps/desktop/package-lock.json
+apps/desktop/sidecar/package-lock.json
+
+# Obsidian workspace state (user-specific, changes frequently)
+docs/.obsidian/workspace.json
