@@ -329,11 +329,11 @@ export function SearchView(props: SearchViewProps) {
         </div>
 
         {/* Right: Document viewer */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto min-w-[400px]">
           {viewingDoc ? (
-            <div className="p-6">
+            <div className="p-6 overflow-x-auto">
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm text-[var(--text-tertiary)]">{viewingDoc.filePath}</span>
+                <span className="text-sm text-[var(--text-tertiary)] truncate mr-2">{viewingDoc.filePath}</span>
                 <div className="flex gap-2">
                   <Button
                     variant="primary"
