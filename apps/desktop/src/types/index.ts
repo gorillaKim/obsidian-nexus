@@ -43,3 +43,30 @@ export interface McpStatus {
 export type Tab = "dashboard" | "search" | "projects" | "guide" | "settings";
 
 export type SearchMode = "hybrid" | "keyword" | "vector";
+
+// Agent / Chat types
+export interface DetectedAgent {
+  cli: "claude" | "gemini";
+  path: string;
+  version: string;
+  authenticated: boolean;
+  models: string[];
+}
+
+export interface SessionMeta {
+  id: string;
+  cli: "claude" | "gemini";
+  model: string;
+  name: string;
+  project_id: string;
+  created_at: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+}
+
+export type AgentStatus = "idle" | "generating" | "compacting" | "done" | "error";

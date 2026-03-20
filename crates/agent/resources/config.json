@@ -1,0 +1,15 @@
+{
+  "agents": {
+    "librarian": {
+      "name": "사서",
+      "prompts": [
+        "librarian/system.md",
+        "librarian/search-strategy.md",
+        "librarian/doc-maintenance.md",
+        "librarian/app-guide.md",
+        "librarian/output-rules.md"
+      ],
+      "enabled": true
+    }
+  }
+}

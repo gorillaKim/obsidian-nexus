@@ -13,9 +13,29 @@ import { useDocViewer } from "./hooks/useDocViewer";
 import { useProjectTree } from "./hooks/useProjectTree";
 import type { Tab } from "./types";
 
+const MIN_CHAT_WIDTH = 280;
+const MAX_CHAT_WIDTH = 640;
+
 function App() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatWidth, setChatWidth] = useState(360);
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = chatWidth;
+    const onMove = (e: MouseEvent) => {
+      const delta = startX - e.clientX;
+      setChatWidth(Math.min(MAX_CHAT_WIDTH, Math.max(MIN_CHAT_WIDTH, startWidth + delta)));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
 
   const projectsHook = useProjects();
   const searchHook = useSearch();
@@ -38,7 +58,7 @@ function App() {
       />
 
       {/* Content area */}
-      <main className="flex-1 min-w-0 overflow-hidden">
+      <main className="flex-1 min-w-[480px] overflow-hidden">
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}
@@ -46,7 +66,7 @@ function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.15 }}
-            className="h-full overflow-y-auto"
+            className="h-full overflow-y-auto overflow-x-auto"
           >
             {tab === "dashboard" && (
               <DashboardView
@@ -118,7 +138,15 @@ function App() {
 
       {/* Chat panel */}
       <AnimatePresence>
-        {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
+        {chatOpen && (
+          <ChatPanel
+            onClose={() => setChatOpen(false)}
+            currentProjectId={projectsHook.projects[0]?.id}
+            currentProjectName={projectsHook.projects[0]?.name}
+            width={chatWidth}
+            onResizeStart={handleResizeStart}
+          />
+        )}
       </AnimatePresence>
     </div>
   );

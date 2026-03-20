@@ -8,6 +8,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 nexus-core = { path = "../../../crates/core" }
+nexus-agent = { path = "../../../crates/agent" }
+tokio = { workspace = true }
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"

@@ -4,10 +4,17 @@
 use nexus_core::db::sqlite::{self, DbPool};
 use nexus_core::project::Project;
 use nexus_core::search::SearchResult;
-use tauri::State;
+use nexus_agent::cli_detector::{self, DetectedAgent};
+use nexus_agent::cli_bridge::SidecarManager;
+use nexus_agent::session::{SessionManager, SessionMeta};
+use nexus_agent::prompt::{PromptLoader, PromptContext};
+use tauri::{AppHandle, Emitter, State};
 
 struct AppState {
     pool: DbPool,
+    session_manager: SessionManager,
+    prompt_loader: PromptLoader,
+    sidecar: SidecarManager,
 }
 
 #[tauri::command]
@@ -505,6 +512,258 @@ fn install_cli_symlinks() {
     }
 }
 
+// === Agent Commands ===
+
+#[tauri::command]
+async fn detect_cli_agents() -> Result<Vec<DetectedAgent>, String> {
+    // Run blocking CLI detection on a separate thread to avoid UI freeze
+    tokio::task::spawn_blocking(|| cli_detector::detect_agents())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn chat_new_session(
+    state: State<AppState>,
+    cli: String,
+    model: String,
+    project_id: String,
+    name: Option<String>,
+) -> Result<SessionMeta, String> {
+    let cli_type = match cli.as_str() {
+        "claude" => nexus_agent::cli_detector::CliType::Claude,
+        "gemini" => nexus_agent::cli_detector::CliType::Gemini,
+        _ => return Err(format!("Unknown CLI type: {}", cli)),
+    };
+
+    state
+        .session_manager
+        .create_session(cli_type, &model, &project_id, name.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn chat_list_sessions(state: State<AppState>) -> Result<Vec<SessionMeta>, String> {
+    state.session_manager.list_sessions().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn chat_delete_session(state: State<AppState>, session_id: String) -> Result<(), String> {
+    state
+        .session_manager
+        .delete_session(&session_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn chat_build_prompt(
+    state: State<AppState>,
+    project_name: String,
+    project_path: String,
+    doc_count: u64,
+    top_tags: Vec<String>,
+) -> Result<String, String> {
+    let context = PromptContext {
+        project_name,
+        project_path,
+        doc_count,
+        top_tags,
+    };
+
+    state
+        .prompt_loader
+        .build_system_prompt("librarian", &context)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn chat_start_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    model: String,
+    project_name: String,
+    project_path: String,
+    doc_count: u64,
+    top_tags: Vec<String>,
+) -> Result<(), String> {
+    // Ensure sidecar is running
+    state.sidecar.ensure_running().map_err(|e| e.to_string())?;
+
+    // Build system prompt
+    let context = PromptContext {
+        project_name,
+        project_path,
+        doc_count,
+        top_tags,
+    };
+    let system_prompt = state
+        .prompt_loader
+        .build_system_prompt("librarian", &context)
+        .map_err(|e| e.to_string())?;
+
+    // Build MCP server config
+    let mcp_server_path = which_nexus_mcp();
+
+    // Send start request
+    let start_req = serde_json::json!({
+        "type": "start",
+        "sessionId": session_id,
+        "model": model,
+        "systemPrompt": system_prompt,
+        "mcpServers": {
+            "nexus": {
+                "command": mcp_server_path.to_string_lossy()
+            }
+        }
+    });
+
+    state.sidecar.send_request(&start_req).map_err(|e| e.to_string())?;
+
+    // Read init response
+    if let Some(resp) = state.sidecar.read_response().map_err(|e| e.to_string())? {
+        let _ = app.emit("chat-stream", &resp);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn chat_send_message(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    message: String,
+) -> Result<(), String> {
+    // Ensure sidecar is running (in case start_session wasn't called or sidecar crashed)
+    state.sidecar.ensure_running().map_err(|e| e.to_string())?;
+
+    // Send message request
+    let msg_req = serde_json::json!({
+        "type": "message",
+        "sessionId": session_id,
+        "content": message
+    });
+
+    state.sidecar.send_request(&msg_req).map_err(|e| e.to_string())?;
+
+    // Read and emit streaming responses until result/error
+    loop {
+        match state.sidecar.read_response() {
+            Ok(Some(resp)) => {
+                let is_terminal = resp.msg_type == "result" || resp.msg_type == "error";
+                let _ = app.emit("chat-stream", &resp);
+                if is_terminal {
+                    // Increment message count on success
+                    if resp.msg_type == "result" {
+                        let _ = state.session_manager.increment_message_count(&session_id);
+                    }
+                    break;
+                }
+            }
+            Ok(None) => {
+                // EOF — sidecar exited
+                let _ = app.emit("chat-stream", serde_json::json!({
+                    "type": "error",
+                    "sessionId": session_id,
+                    "code": "sidecar_exit",
+                    "message": "사서 프로세스가 종료되었습니다",
+                    "retryable": true
+                }));
+                break;
+            }
+            Err(e) => {
+                let _ = app.emit("chat-stream", serde_json::json!({
+                    "type": "error",
+                    "sessionId": session_id,
+                    "code": "read_error",
+                    "message": e.to_string(),
+                    "retryable": true
+                }));
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn chat_rename_session(state: State<AppState>, session_id: String, name: String) -> Result<(), String> {
+    state.session_manager.update_session_name(&session_id, &name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn chat_cancel(state: State<AppState>, session_id: String) -> Result<(), String> {
+    let req = serde_json::json!({ "type": "cancel", "sessionId": session_id });
+    state.sidecar.send_request(&req).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn chat_close_session(state: State<AppState>, session_id: String) -> Result<(), String> {
+    // Try to send close to sidecar (best-effort, ignore if not running)
+    if state.sidecar.is_running() {
+        let req = serde_json::json!({ "type": "close", "sessionId": session_id });
+        let _ = state.sidecar.send_request(&req);
+    }
+    // Always delete session metadata
+    state.session_manager.delete_session(&session_id).map_err(|e| e.to_string())
+}
+
+fn find_sidecar_script() -> std::path::PathBuf {
+    // Try multiple candidate paths
+    let candidates = vec![
+        // Dev: Tauri runs from src-tauri, cwd is project root
+        std::env::current_dir()
+            .unwrap_or_default()
+            .join("apps/desktop/sidecar/claude-bridge.mjs"),
+        // Dev: relative from src-tauri
+        std::path::PathBuf::from("../sidecar/claude-bridge.mjs"),
+        // Dev: relative from workspace root
+        std::path::PathBuf::from("apps/desktop/sidecar/claude-bridge.mjs"),
+        // Absolute fallback (project specific)
+        std::path::PathBuf::from(
+            std::env::var("NEXUS_SIDECAR_PATH")
+                .unwrap_or_default(),
+        ),
+    ];
+
+    for path in &candidates {
+        if path.exists() {
+            return path
+                .canonicalize()
+                .unwrap_or_else(|_| path.clone());
+        }
+    }
+
+    // Last resort — will fail at runtime with clear error
+    eprintln!("WARNING: sidecar script not found in any candidate path");
+    candidates[0].clone()
+}
+
+fn which_nexus_mcp() -> std::path::PathBuf {
+    // Try common paths
+    let home = dirs::home_dir().unwrap_or_default();
+    let local_bin = home.join(".local").join("bin").join("nexus-mcp-server");
+    if local_bin.exists() {
+        return local_bin;
+    }
+
+    // Fallback: try which
+    if let Ok(output) = std::process::Command::new("which")
+        .arg("nexus-mcp-server")
+        .output()
+    {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return std::path::PathBuf::from(path);
+        }
+    }
+
+    // Last resort
+    local_bin
+}
+
 fn main() {
     // Auto-setup on first launch
     ensure_obsidian();
@@ -514,12 +773,29 @@ fn main() {
     let pool = sqlite::create_pool().expect("Failed to create database pool");
     sqlite::run_migrations(&pool).expect("Failed to run migrations");
 
+    // Initialize agent subsystem
+    let session_manager = SessionManager::new().expect("Failed to initialize session manager");
+    let prompt_loader = PromptLoader::new().expect("Failed to initialize prompt loader");
+    prompt_loader
+        .ensure_defaults()
+        .expect("Failed to initialize default prompts");
+
+    // Sidecar script path resolution
+    let sidecar_script = find_sidecar_script();
+    eprintln!("Sidecar script: {}", sidecar_script.display());
+    let sidecar = SidecarManager::new(sidecar_script);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(AppState { pool })
+        .manage(AppState {
+            pool,
+            session_manager,
+            prompt_loader,
+            sidecar,
+        })
         .invoke_handler(tauri::generate_handler![
             list_projects,
             search_documents,
@@ -537,6 +813,16 @@ fn main() {
             mcp_register,
             mcp_path,
             cli_path,
+            detect_cli_agents,
+            chat_new_session,
+            chat_list_sessions,
+            chat_delete_session,
+            chat_build_prompt,
+            chat_start_session,
+            chat_send_message,
+            chat_rename_session,
+            chat_cancel,
+            chat_close_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
