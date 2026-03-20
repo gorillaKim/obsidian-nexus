@@ -12,46 +12,48 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      # Cache Rust build artifacts
-      - name: Cache Cargo registry + build
+      - name: Cache pnpm store
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-desktop-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-desktop-
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('apps/desktop/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
 
-      # Cache Tauri CLI
+      - run: corepack enable && pnpm install --no-frozen-lockfile
+        working-directory: apps/desktop
+
       - name: Cache Tauri CLI
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/cargo-tauri
           key: ${{ runner.os }}-tauri-cli-2
 
-      - run: corepack enable && pnpm install --no-frozen-lockfile
-        working-directory: apps/desktop
+      - name: Install Tauri CLI
+        run: which cargo-tauri || cargo install tauri-cli --version "^2"
 
-      # Build sidecars for both architectures
-      - name: Build sidecars (aarch64)
+      - name: Build sidecars (aarch64 + x86_64)
         run: |
-          cargo build --release --target aarch64-apple-darwin -p nexus-cli -p nexus-mcp-server
-          cp target/aarch64-apple-darwin/release/nexus apps/desktop/src-tauri/binaries/nexus-aarch64-apple-darwin
+          cargo build --release \
+            --target aarch64-apple-darwin \
+            --target x86_64-apple-darwin \
+            -p nexus-cli -p nexus-mcp-server
+          cp target/aarch64-apple-darwin/release/nexus            apps/desktop/src-tauri/binaries/nexus-aarch64-apple-darwin
           cp target/aarch64-apple-darwin/release/nexus-mcp-server apps/desktop/src-tauri/binaries/nexus-mcp-server-aarch64-apple-darwin
-
-      - name: Build sidecars (x86_64)
-        run: |
-          cargo build --release --target x86_64-apple-darwin -p nexus-cli -p nexus-mcp-server
-          cp target/x86_64-apple-darwin/release/nexus apps/desktop/src-tauri/binaries/nexus-x86_64-apple-darwin
-          cp target/x86_64-apple-darwin/release/nexus-mcp-server apps/desktop/src-tauri/binaries/nexus-mcp-server-x86_64-apple-darwin
+          cp target/x86_64-apple-darwin/release/nexus             apps/desktop/src-tauri/binaries/nexus-x86_64-apple-darwin
+          cp target/x86_64-apple-darwin/release/nexus-mcp-server  apps/desktop/src-tauri/binaries/nexus-mcp-server-x86_64-apple-darwin
 
       - name: Create universal sidecars
         run: |
@@ -64,9 +66,6 @@ jobs:
             apps/desktop/src-tauri/binaries/nexus-mcp-server-x86_64-apple-darwin \
             -output apps/desktop/src-tauri/binaries/nexus-mcp-server-universal-apple-darwin
 
-      - name: Install Tauri CLI
-        run: which cargo-tauri || cargo install tauri-cli --version "^2"
-
       - name: Build Tauri universal binary
         working-directory: apps/desktop
         env:
@@ -74,40 +73,20 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: cargo tauri build --target universal-apple-darwin
 
-      # Debug: list bundle output
-      - name: List bundle output
-        if: always()
-        run: |
-          echo "=== Searching for bundle files ==="
-          find . -name "*.dmg" -o -name "*.tar.gz.sig" -o -name "*.app.tar.gz" 2>/dev/null | head -20
-
       - name: Prepare artifacts and generate latest.json
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-
-          # Find bundle files dynamically
           DMG=$(find . -name "*.dmg" -path "*/bundle/*" | head -1)
           TARGZ=$(find . -name "*.app.tar.gz" -path "*/bundle/*" | head -1)
           SIG=$(find . -name "*.app.tar.gz.sig" -path "*/bundle/*" | head -1)
 
-          echo "DMG: ${DMG}"
-          echo "TARGZ: ${TARGZ}"
-          echo "SIG: ${SIG}"
+          [ -n "$DMG" ]    && cp "$DMG"    ./Obsidian-Nexus.dmg
+          [ -n "$TARGZ" ]  && cp "$TARGZ"  ./Obsidian.Nexus.app.tar.gz
+          [ -n "$SIG" ]    && cp "$SIG"    ./Obsidian.Nexus.app.tar.gz.sig
 
-          # Copy with safe names
-          [ -n "$DMG" ] && cp "$DMG" ./Obsidian-Nexus.dmg
-          [ -n "$TARGZ" ] && cp "$TARGZ" ./Obsidian.Nexus.app.tar.gz
-          [ -n "$SIG" ] && cp "$SIG" ./Obsidian.Nexus.app.tar.gz.sig
-
-          # Read signature
           SIG_CONTENT=""
-          if [ -f "./Obsidian.Nexus.app.tar.gz.sig" ]; then
-            SIG_CONTENT=$(cat "./Obsidian.Nexus.app.tar.gz.sig")
-          else
-            echo "WARNING: No signature file. TAURI_SIGNING_PRIVATE_KEY may not be set."
-          fi
+          [ -f "./Obsidian.Nexus.app.tar.gz.sig" ] && SIG_CONTENT=$(cat "./Obsidian.Nexus.app.tar.gz.sig")
 
-          # Generate latest.json
           cat > latest.json <<ENDJSON
           {
             "version": "${VERSION}",
@@ -126,8 +105,6 @@ jobs:
           }
           ENDJSON
 
-          ls -la Obsidian* latest.json
-
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -138,34 +115,29 @@ jobs:
             latest.json
 
   cli:
-    needs: desktop
+    # desktop과 병렬 실행 — 의존성 없음
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      # Cache Rust build artifacts
-      - name: Cache Cargo registry + build
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-cli-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-cli-
+          key: cli
 
-      - name: Build aarch64
+      - name: Build aarch64 + x86_64
         run: |
-          cargo build --release --target aarch64-apple-darwin -p nexus-cli -p nexus-mcp-server
+          cargo build --release \
+            --target aarch64-apple-darwin \
+            --target x86_64-apple-darwin \
+            -p nexus-cli -p nexus-mcp-server
+
           tar czf nexus-cli-darwin-aarch64.tar.gz -C target/aarch64-apple-darwin/release nexus nexus-mcp-server
           shasum -a 256 nexus-cli-darwin-aarch64.tar.gz > nexus-cli-darwin-aarch64.tar.gz.sha256
 
-      - name: Build x86_64
-        run: |
-          cargo build --release --target x86_64-apple-darwin -p nexus-cli -p nexus-mcp-server
           tar czf nexus-cli-darwin-x86_64.tar.gz -C target/x86_64-apple-darwin/release nexus nexus-mcp-server
           shasum -a 256 nexus-cli-darwin-x86_64.tar.gz > nexus-cli-darwin-x86_64.tar.gz.sha256
 
