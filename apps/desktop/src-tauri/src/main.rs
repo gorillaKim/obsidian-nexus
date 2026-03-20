@@ -320,22 +320,11 @@ fn open_file(
             .unwrap_or(false);
 
     if obsidian_installed {
-        // Use Obsidian URI scheme to open the specific file in the vault
-        // obsidian://open?vault=VAULT_NAME&file=FILE_PATH (without .md extension)
-        // vault_name must match Obsidian's registered vault name (= folder name, not on-config.json name)
-        let vault_folder_name = std::path::Path::new(&proj.path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| proj.name.clone());
-        let file_without_ext = if file_path.ends_with(".md") {
-            &file_path[..file_path.len() - 3]
-        } else {
-            &file_path
-        };
+        // Use Obsidian URI with absolute path to avoid vault name conflicts
+        // (e.g., multiple vaults named "docs")
         let uri = format!(
-            "obsidian://open?vault={}&file={}",
-            urlencoding(&vault_folder_name),
-            urlencoding(&file_without_ext),
+            "obsidian://open?path={}",
+            urlencoding(&abs_path.to_string_lossy()),
         );
         let status = std::process::Command::new("open")
             .arg(&uri)
