@@ -53,7 +53,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: cargo tauri build --target universal-apple-darwin --bundles dmg,updater --config apps/desktop/src-tauri/tauri.conf.json
+        run: cargo tauri build --target universal-apple-darwin --bundles app,dmg --config apps/desktop/src-tauri/tauri.conf.json
 
       # Debug: list bundle output
       - name: List bundle output
