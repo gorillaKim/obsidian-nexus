@@ -171,8 +171,8 @@ nexus_search(query="MCP", limit=10) → 10개 결과 (3개 볼트)
 **Filesystem** (3회 호출, 1,820자):
 ```
 Grep "MCP" --glob "*.md" path="docs/" → 26줄 매칭
-Grep "MCP" --glob "*.md" path="/Users/madup/Documents/Obsidian Vault/"
-Grep "MCP" --glob "*.md" path="/Users/madup/Documents/test-vault/"
+Grep "MCP" --glob "*.md" path="~/Documents/Obsidian Vault/"
+Grep "MCP" --glob "*.md" path="~/Documents/test-vault/"
 ```
 - 볼트 수만큼 별도 호출 필요, 결과 합산은 수동
 

@@ -136,9 +136,9 @@ fn find_sidecar(name: &str) -> Option<String> {
             }
         }
     }
-    // 3. Cargo release build path (dev mode fallback)
+    // 3. ~/.local/bin fallback (symlinked during install)
     if let Some(home) = dirs::home_dir() {
-        let candidate = home.join(format!("gorillaProject/obsidian-nexus/target/release/{}", name));
+        let candidate = home.join(format!(".local/bin/{}", name));
         if candidate.exists() {
             return Some(candidate.to_string_lossy().to_string());
         }
@@ -309,8 +309,13 @@ fn open_file(
         .map_err(|e| e.to_string())?;
     let abs_path = std::path::Path::new(&proj.path).join(&file_path);
 
-    if !abs_path.exists() {
-        return Err(format!("File not found: {}", abs_path.display()));
+    // Path traversal guard: ensure resolved path stays within the project directory
+    let abs_path = abs_path.canonicalize().map_err(|e| format!("Invalid path: {}", e))?;
+    let vault_path = std::path::Path::new(&proj.path)
+        .canonicalize()
+        .map_err(|e| format!("Invalid project path: {}", e))?;
+    if !abs_path.starts_with(&vault_path) {
+        return Err("Access denied: path is outside the project directory".to_string());
     }
 
     // Check if Obsidian is installed (macOS)

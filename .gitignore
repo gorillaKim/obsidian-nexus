@@ -1,7 +1,7 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock is committed for reproducible builds (binary project)
 
 # Node
 node_modules/
@@ -27,4 +27,7 @@ Thumbs.db
 # Claude Code
 .claude/
 .serena/
+
+# MCP config (contains local absolute paths)
+.mcp.json
 apps/desktop/package-lock.json

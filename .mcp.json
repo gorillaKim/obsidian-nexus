@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "nexus": {
-      "type": "stdio",
-      "command": "/Users/madup/gorillaProject/obsidian-nexus/target/release/nexus-mcp-server",
-      "args": []
-    }
-  }
-}
