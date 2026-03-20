@@ -239,6 +239,33 @@ GitHub Actions가 자동으로 빌드 + Release 생성:
 - CLI 바이너리 (aarch64 + x86_64)
 - 자동 업데이트 번들 (`latest.json` + 서명)
 
+## Update
+
+### Desktop 앱 자동 업데이트
+
+앱 실행 중 새 버전이 릴리즈되면 자동으로 업데이트 알림이 표시됩니다. 확인을 누르면 재시작 후 최신 버전으로 업데이트됩니다.
+
+> Desktop 앱 내부에 CLI(`obs-nexus`)와 MCP 서버(`nexus-mcp-server`)가 내장되어 있어, 앱을 통해 실행하는 경우 항상 최신 버전을 사용합니다.
+
+### CLI 업데이트
+
+터미널에서 직접 `obs-nexus`를 사용하는 경우 별도로 업데이트해야 합니다:
+
+```bash
+obs-nexus update          # 최신 버전 확인 + 설치
+obs-nexus update --check  # 확인만 (설치 안 함)
+```
+
+MCP 서버(`nexus-mcp-server`)는 CLI 업데이트 시 함께 교체됩니다.
+
+### 버전 확인
+
+```bash
+obs-nexus --version
+```
+
+---
+
 ## License
 
 MIT
