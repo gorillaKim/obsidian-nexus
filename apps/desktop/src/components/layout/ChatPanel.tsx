@@ -27,7 +27,7 @@ function extractText(node: React.ReactNode): string {
   return "";
 }
 
-function CodeBlock({ children, className }: { children?: React.ReactNode; className?: string }) {
+function CodeBlock({ children, className, onCopy }: { children?: React.ReactNode; className?: string; onCopy?: () => void }) {
   const [copied, setCopied] = useState(false);
   const lang = className?.replace("language-", "") ?? "text";
   const text = extractText(children);
@@ -37,10 +37,10 @@ function CodeBlock({ children, className }: { children?: React.ReactNode; classN
     try {
       await invoke("write_clipboard", { text: content });
     } catch {
-      // web fallback (dev mode)
       await navigator.clipboard.writeText(content).catch(() => {});
     }
     setCopied(true);
+    onCopy?.();
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -106,7 +106,13 @@ export function ChatPanel({
   const [initializing, setInitializing] = useState(true);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 2000);
+  };
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -192,6 +198,12 @@ export function ChatPanel({
         className="absolute left-0 top-0 w-1 h-full cursor-col-resize z-10 hover:bg-[var(--accent)] opacity-0 hover:opacity-30 transition-opacity"
         onMouseDown={onResizeStart}
       />
+      {/* Toast */}
+      {toastMsg && (
+        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-md bg-[var(--bg-primary)] border border-[var(--border)] text-xs text-[var(--text-primary)] shadow-lg pointer-events-none">
+          {toastMsg}
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between px-4 h-14 border-b border-[var(--border)] flex-shrink-0">
         <div className="flex items-center gap-2">
@@ -353,7 +365,7 @@ export function ChatPanel({
                             code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
                               const isBlock = className?.startsWith("language-");
                               return isBlock ? (
-                                <CodeBlock className={className}>{children}</CodeBlock>
+                                <CodeBlock className={className} onCopy={() => showToast("복사됨")}>{children}</CodeBlock>
                               ) : (
                                 <code className="px-1 py-0.5 rounded text-xs font-mono bg-[var(--bg-primary)] text-[var(--accent)]">{children}</code>
                               );
@@ -381,6 +393,7 @@ export function ChatPanel({
                           } catch {
                             await navigator.clipboard.writeText(msg.content).catch(() => {});
                           }
+                          showToast("복사됨");
                         }}
                         className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--bg-secondary)]"
                         title="메시지 복사"

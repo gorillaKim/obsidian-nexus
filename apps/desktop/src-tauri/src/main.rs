@@ -769,8 +769,18 @@ fn chat_rename_session(state: State<AppState>, session_id: String, name: String)
 
 #[tauri::command]
 fn write_clipboard(text: String) -> Result<(), String> {
-    let mut ctx = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-    ctx.set_text(text).map_err(|e| e.to_string())
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("pbcopy")
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("pbcopy spawn failed: {}", e))?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(text.as_bytes())
+            .map_err(|e| format!("pbcopy write failed: {}", e))?;
+    }
+    child.wait().map_err(|e| format!("pbcopy wait failed: {}", e))?;
+    Ok(())
 }
 
 #[tauri::command]
