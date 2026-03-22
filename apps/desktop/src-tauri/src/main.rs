@@ -768,6 +768,12 @@ fn chat_rename_session(state: State<AppState>, session_id: String, name: String)
 }
 
 #[tauri::command]
+fn write_clipboard(text: String) -> Result<(), String> {
+    let mut ctx = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    ctx.set_text(text).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn chat_cancel(state: State<AppState>, session_id: String) -> Result<(), String> {
     let req = serde_json::json!({ "type": "cancel", "sessionId": session_id });
     state.sidecar.send_request(&req).map_err(|e| e.to_string())
@@ -911,6 +917,7 @@ fn main() {
             chat_rename_session,
             chat_cancel,
             chat_close_session,
+            write_clipboard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

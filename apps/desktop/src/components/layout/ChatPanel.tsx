@@ -15,6 +15,7 @@ import {
   Copy,
   Check,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { IconButton } from "../ui/IconButton";
 import { useChat } from "../../hooks/useChat";
 
@@ -33,25 +34,11 @@ function CodeBlock({ children, className }: { children?: React.ReactNode; classN
 
   const handleCopy = async () => {
     const content = text.trimEnd();
-    let ok = false;
-    if (navigator.clipboard) {
-      try {
-        await navigator.clipboard.writeText(content);
-        ok = true;
-      } catch {
-        // fall through to execCommand
-      }
-    }
-    if (!ok) {
-      const el = document.createElement("textarea");
-      el.value = content;
-      el.style.position = "fixed";
-      el.style.opacity = "0";
-      document.body.appendChild(el);
-      el.focus();
-      el.select();
-      document.execCommand("copy");
-      document.body.removeChild(el);
+    try {
+      await invoke("write_clipboard", { text: content });
+    } catch {
+      // web fallback (dev mode)
+      await navigator.clipboard.writeText(content).catch(() => {});
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -363,12 +350,14 @@ export function ChatPanel({
                             ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-0.5">{children}</ul>,
                             ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-0.5">{children}</ol>,
                             li: ({ children }) => <li className="text-sm">{children}</li>,
-                            code: ({ inline, children, className }: { inline?: boolean; children?: React.ReactNode; className?: string }) =>
-                              inline ? (
-                                <code className="px-1 py-0.5 rounded text-xs font-mono bg-[var(--bg-primary)] text-[var(--accent)]">{children}</code>
-                              ) : (
+                            code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
+                              const isBlock = className?.startsWith("language-");
+                              return isBlock ? (
                                 <CodeBlock className={className}>{children}</CodeBlock>
-                              ),
+                              ) : (
+                                <code className="px-1 py-0.5 rounded text-xs font-mono bg-[var(--bg-primary)] text-[var(--accent)]">{children}</code>
+                              );
+                            },
                             pre: ({ children }) => <>{children}</>,
                             blockquote: ({ children }) => <blockquote className="border-l-2 border-[var(--accent)] pl-3 my-2 text-[var(--text-secondary)] italic">{children}</blockquote>,
                             strong: ({ children }) => <strong className="font-semibold text-[var(--text-primary)]">{children}</strong>,
