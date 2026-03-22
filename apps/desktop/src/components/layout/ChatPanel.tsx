@@ -377,14 +377,9 @@ export function ChatPanel({
                       <button
                         onClick={async () => {
                           try {
-                            await navigator.clipboard.writeText(msg.content);
+                            await invoke("write_clipboard", { text: msg.content });
                           } catch {
-                            const el = document.createElement("textarea");
-                            el.value = msg.content;
-                            document.body.appendChild(el);
-                            el.select();
-                            document.execCommand("copy");
-                            document.body.removeChild(el);
+                            await navigator.clipboard.writeText(msg.content).catch(() => {});
                           }
                         }}
                         className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--bg-secondary)]"
