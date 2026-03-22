@@ -66,6 +66,17 @@ async function handleStart(req) {
     systemPrompt,
     mcpServers: mcpServers || {},
     permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
+    // Allow nexus_ MCP tools and read-only built-ins; deny anything else
+    canUseTool: async (toolName, _input, opts) => {
+      const allowed =
+        toolName.startsWith("nexus_") ||
+        ["Read", "LS", "Glob", "Grep", "WebSearch", "WebFetch"].includes(toolName);
+      if (allowed) {
+        return { behavior: "allow", updatedPermissions: opts.suggestions };
+      }
+      return { behavior: "deny", message: `Tool '${toolName}' is not permitted in this context.` };
+    },
     pathToClaudeCodeExecutable: findClaudeBinary(),
   };
 
@@ -128,6 +139,8 @@ async function handleMessage(req) {
   } catch (err) {
     if (err.name === "AbortError") {
       log(`Session ${sessionId} cancelled`);
+      // Emit a terminal event so the Rust read_response loop can exit
+      emit({ type: "cancelled", sessionId });
       return;
     }
     emit({
