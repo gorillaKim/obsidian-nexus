@@ -113,6 +113,8 @@ function App() {
                 toggleFolder={tree.toggleFolder}
                 toggleResult={tree.toggleResult}
                 buildTree={tree.buildTree}
+                isRefreshing={tree.isRefreshing}
+                refreshAllProjects={tree.refreshAllProjects}
               />
             )}
 

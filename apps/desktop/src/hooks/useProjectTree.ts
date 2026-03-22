@@ -13,6 +13,25 @@ export function useProjectTree() {
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [projectDocs, setProjectDocs] = useState<Map<string, DocItem[]>>(new Map());
 
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const refreshAllProjects = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      const updated = new Map<string, DocItem[]>();
+      for (const projectId of expandedProjects) {
+        const docs = await invoke<DocItem[]>("list_documents", { projectId });
+        updated.set(projectId, docs);
+      }
+      setProjectDocs((prev) => new Map([...prev, ...updated]));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const toggleProject = async (projectId: string) => {
     const next = new Set(expandedProjects);
     if (next.has(projectId)) {
@@ -68,9 +87,11 @@ export function useProjectTree() {
     expandedFolders,
     expandedResults,
     projectDocs,
+    isRefreshing,
     toggleProject,
     toggleFolder,
     toggleResult,
     buildTree,
+    refreshAllProjects,
   };
 }

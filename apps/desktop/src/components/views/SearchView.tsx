@@ -2,7 +2,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Search, Settings2, ChevronDown, ChevronRight,
-  FolderOpen, FileText, ExternalLink, X,
+  FolderOpen, FileText, ExternalLink, X, RefreshCw,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/Button";
@@ -51,6 +51,8 @@ interface SearchViewProps {
   toggleFolder: (folderKey: string) => void;
   toggleResult: (filePath: string) => void;
   buildTree: (docs: DocItem[]) => TreeData;
+  isRefreshing: boolean;
+  refreshAllProjects: () => Promise<void>;
 }
 
 const modeLabels: Record<SearchMode, string> = {
@@ -70,6 +72,7 @@ export function SearchView(props: SearchViewProps) {
     viewingDoc, viewDocument, openFile, closeDoc,
     expandedProjects, expandedFolders, expandedResults, projectDocs,
     toggleProject, toggleFolder, toggleResult, buildTree,
+    isRefreshing, refreshAllProjects,
   } = props;
 
   return (
@@ -90,6 +93,13 @@ export function SearchView(props: SearchViewProps) {
           </Button>
           <IconButton active={showSettings} onClick={() => setShowSettings(!showSettings)}>
             <Settings2 size={16} />
+          </IconButton>
+          <IconButton
+            onClick={refreshAllProjects}
+            disabled={isRefreshing}
+            title="프로젝트 및 문서 목록 새로고침"
+          >
+            <RefreshCw size={16} className={isRefreshing ? "animate-spin" : ""} />
           </IconButton>
         </div>
 

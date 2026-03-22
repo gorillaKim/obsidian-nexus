@@ -88,6 +88,17 @@ body {
 .prose hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 .prose img { max-width: 100%; border-radius: 8px; }
 
+/* Chat message text selection */
+.prose-chat,
+.prose-chat * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.prose-chat button {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* Range input styling */
 input[type="range"] {
   -webkit-appearance: none;
