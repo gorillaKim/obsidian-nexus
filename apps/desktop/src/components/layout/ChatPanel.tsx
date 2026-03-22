@@ -32,12 +32,23 @@ function CodeBlock({ children, className }: { children?: React.ReactNode; classN
   const text = extractText(children);
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text.trimEnd());
-    } catch {
+    const content = text.trimEnd();
+    let ok = false;
+    if (navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(content);
+        ok = true;
+      } catch {
+        // fall through to execCommand
+      }
+    }
+    if (!ok) {
       const el = document.createElement("textarea");
-      el.value = text.trimEnd();
+      el.value = content;
+      el.style.position = "fixed";
+      el.style.opacity = "0";
       document.body.appendChild(el);
+      el.focus();
       el.select();
       document.execCommand("copy");
       document.body.removeChild(el);
@@ -52,7 +63,7 @@ function CodeBlock({ children, className }: { children?: React.ReactNode; classN
         <span className="text-xs text-[var(--text-tertiary)] font-mono">{lang}</span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+          className="flex items-center gap-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
         >
           {copied ? <Check size={11} /> : <Copy size={11} />}
           {copied ? "복사됨" : "복사"}
