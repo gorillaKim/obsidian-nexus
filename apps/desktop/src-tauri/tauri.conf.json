@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/tauri/tauri.conf.json",
   "productName": "Obsidian Nexus",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "identifier": "com.obsidian-nexus.desktop",
   "build": {
     "frontendDist": "../dist",
