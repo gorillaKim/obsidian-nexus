@@ -15,7 +15,6 @@ import {
   Copy,
   Check,
 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 import { IconButton } from "../ui/IconButton";
 import { useChat } from "../../hooks/useChat";
 
@@ -34,11 +33,7 @@ function CodeBlock({ children, className, onCopy }: { children?: React.ReactNode
 
   const handleCopy = async () => {
     const content = text.trimEnd();
-    try {
-      await invoke("write_clipboard", { text: content });
-    } catch {
-      await navigator.clipboard.writeText(content).catch(() => {});
-    }
+    await navigator.clipboard.writeText(content).catch(() => {});
     setCopied(true);
     onCopy?.();
     setTimeout(() => setCopied(false), 2000);
