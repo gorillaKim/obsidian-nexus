@@ -1,17 +1,16 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::error::AgentError;
 
 /// Find the Node.js binary, searching common locations including nvm.
 /// macOS GUI apps don't inherit shell PATH, so we must search explicitly.
 fn find_node_binary() -> PathBuf {
-    // 1. Common system/brew paths
     let system_candidates = [
         "/usr/local/bin/node",
         "/opt/homebrew/bin/node",
@@ -22,8 +21,6 @@ fn find_node_binary() -> PathBuf {
             return PathBuf::from(path);
         }
     }
-
-    // 2. nvm: ~/.nvm/versions/node/*/bin/node (pick highest version)
     if let Some(home) = dirs::home_dir() {
         let nvm_dir = home.join(".nvm/versions/node");
         if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
@@ -37,8 +34,6 @@ fn find_node_binary() -> PathBuf {
             }
         }
     }
-
-    // 3. Fallback: hope it's in PATH
     PathBuf::from("node")
 }
 
@@ -75,45 +70,51 @@ pub struct BridgeResponse {
     pub message: Option<String>,
     #[serde(default)]
     pub retryable: Option<bool>,
+    #[serde(default)]
+    pub cancelled: Option<bool>,
 }
 
 /// Manages a Node.js sidecar process for Claude Agent SDK communication.
+///
+/// stdin and reader use SEPARATE mutexes so send_request (e.g. cancel)
+/// is never blocked by a concurrent blocking read_line in the reader loop.
 pub struct SidecarManager {
-    process: Arc<Mutex<Option<SidecarProcess>>>,
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
+    /// Owned by the background reader thread after take_reader() is called.
+    reader: Mutex<Option<BufReader<ChildStdout>>>,
+    child: Mutex<Option<Child>>,
     sidecar_script: PathBuf,
-}
-
-struct SidecarProcess {
-    child: Child,
-    stdin: ChildStdin,
-    reader: BufReader<ChildStdout>,
-}
-
-fn lock_process(
-    mutex: &Mutex<Option<SidecarProcess>>,
-) -> Result<std::sync::MutexGuard<'_, Option<SidecarProcess>>, AgentError> {
-    mutex
-        .lock()
-        .map_err(|_| AgentError::ProcessCommFailed("Lock poisoned".to_string()))
 }
 
 impl SidecarManager {
     pub fn new(sidecar_script: PathBuf) -> Self {
         Self {
-            process: Arc::new(Mutex::new(None)),
+            stdin: Arc::new(Mutex::new(None)),
+            reader: Mutex::new(None),
+            child: Mutex::new(None),
             sidecar_script,
         }
     }
 
-    /// Start the Node.js sidecar process if not already running.
+    /// Start the sidecar if not already running (or if it has crashed).
     pub fn ensure_running(&self) -> Result<(), AgentError> {
-        let mut proc = lock_process(&self.process)?;
-        if proc.is_some() {
-            return Ok(());
+        let mut child_guard = self.child.lock()
+            .map_err(|_| AgentError::ProcessCommFailed("Lock poisoned".to_string()))?;
+
+        // Check if existing child is still alive
+        if let Some(child) = child_guard.as_mut() {
+            match child.try_wait() {
+                Ok(None) => return Ok(()), // still running
+                _ => {
+                    // Exited or error — reset all state and restart
+                    child_guard.take();
+                    if let Ok(mut g) = self.stdin.lock() { g.take(); }
+                    if let Ok(mut g) = self.reader.lock() { g.take(); }
+                }
+            }
         }
 
         info!("Starting sidecar: node {}", self.sidecar_script.display());
-
         let node_bin = find_node_binary();
         info!("Using node binary: {}", node_bin.display());
 
@@ -128,90 +129,65 @@ impl SidecarManager {
         let stdin = child.stdin.take().ok_or_else(|| {
             AgentError::ProcessSpawnFailed("Failed to capture sidecar stdin".to_string())
         })?;
-
         let stdout = child.stdout.take().ok_or_else(|| {
             AgentError::ProcessSpawnFailed("Failed to capture sidecar stdout".to_string())
         })?;
 
-        let reader = BufReader::new(stdout);
-
-        *proc = Some(SidecarProcess {
-            child,
-            stdin,
-            reader,
-        });
+        *self.stdin.lock().map_err(|_| AgentError::ProcessCommFailed("Lock poisoned".to_string()))? = Some(stdin);
+        *self.reader.lock().map_err(|_| AgentError::ProcessCommFailed("Lock poisoned".to_string()))? = Some(BufReader::new(stdout));
+        *child_guard = Some(child);
 
         info!("Sidecar started");
         Ok(())
     }
 
+    /// Take ownership of the reader for the background reader thread.
+    /// Should be called once after ensure_running().
+    pub fn take_reader(&self) -> Option<BufReader<ChildStdout>> {
+        self.reader.lock().ok()?.take()
+    }
+
     /// Send a JSONL request to the sidecar's stdin.
+    /// Uses a separate lock from the reader — never blocks on read_line.
     pub fn send_request(&self, request: &serde_json::Value) -> Result<(), AgentError> {
-        let mut proc = lock_process(&self.process)?;
-        let sidecar = proc.as_mut().ok_or_else(|| {
+        let mut stdin_guard = self.stdin.lock()
+            .map_err(|_| AgentError::ProcessCommFailed("Lock poisoned".to_string()))?;
+        let stdin = stdin_guard.as_mut().ok_or_else(|| {
             AgentError::ProcessCommFailed("Sidecar not running".to_string())
         })?;
 
         let line = serde_json::to_string(request)
             .map_err(|e| AgentError::ProcessCommFailed(e.to_string()))?;
-
-        writeln!(sidecar.stdin, "{}", line)
+        writeln!(stdin, "{}", line)
             .map_err(|e| AgentError::ProcessCommFailed(format!("stdin write failed: {}", e)))?;
-
-        sidecar.stdin.flush()
+        stdin.flush()
             .map_err(|e| AgentError::ProcessCommFailed(format!("stdin flush failed: {}", e)))?;
 
         debug!("Sent request: {}", request.get("type").and_then(|t| t.as_str()).unwrap_or("?"));
-
         Ok(())
-    }
-
-    /// Read one JSONL response line from sidecar stdout.
-    /// Returns None on EOF (sidecar exited).
-    pub fn read_response(&self) -> Result<Option<BridgeResponse>, AgentError> {
-        let mut proc = lock_process(&self.process)?;
-        let sidecar = proc.as_mut().ok_or_else(|| {
-            AgentError::ProcessCommFailed("Sidecar not running".to_string())
-        })?;
-
-        let mut line = String::new();
-        match sidecar.reader.read_line(&mut line) {
-            Ok(0) => {
-                warn!("Sidecar EOF — process exited");
-                Ok(None)
-            }
-            Ok(_) => {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    return Ok(None);
-                }
-                let resp: BridgeResponse = serde_json::from_str(trimmed)
-                    .map_err(|e| AgentError::ProcessCommFailed(format!("JSON parse error: {} (line: {})", e, trimmed)))?;
-                Ok(Some(resp))
-            }
-            Err(e) => Err(AgentError::ProcessCommFailed(format!("stdout read failed: {}", e))),
-        }
     }
 
     /// Check if the sidecar process is alive.
     pub fn is_running(&self) -> bool {
-        lock_process(&self.process)
-            .map(|proc| proc.is_some())
+        self.child.lock()
+            .map(|mut g| {
+                g.as_mut()
+                    .map(|c| c.try_wait().ok().and_then(|s| s).is_none())
+                    .unwrap_or(false)
+            })
             .unwrap_or(false)
     }
 
     /// Shutdown the sidecar process.
     pub fn shutdown(&self) {
-        if let Ok(mut proc) = lock_process(&self.process) {
-            if let Some(mut sidecar) = proc.take() {
-                // Close stdin to signal shutdown
-                drop(sidecar.stdin);
-                // Wait briefly then kill
-                match sidecar.child.try_wait() {
+        if let Ok(mut g) = self.stdin.lock() { g.take(); }
+        if let Ok(mut g) = self.child.lock() {
+            if let Some(mut child) = g.take() {
+                match child.try_wait() {
                     Ok(Some(_)) => info!("Sidecar exited cleanly"),
                     _ => {
-                        let _ = sidecar.child.kill();
-                        let _ = sidecar.child.wait();
+                        let _ = child.kill();
+                        let _ = child.wait();
                         info!("Sidecar killed");
                     }
                 }
@@ -263,6 +239,13 @@ mod tests {
         let resp: BridgeResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.msg_type, "result");
         assert_eq!(resp.cost.unwrap(), 0.05);
+    }
+
+    #[test]
+    fn test_parse_bridge_response_cancelled() {
+        let json = r#"{"type":"cancelled","sessionId":"abc"}"#;
+        let resp: BridgeResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.msg_type, "cancelled");
     }
 
     #[test]

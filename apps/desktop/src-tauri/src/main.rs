@@ -1,20 +1,100 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::collections::HashMap;
+use std::io::BufRead;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use nexus_core::db::sqlite::{self, DbPool};
 use nexus_core::project::Project;
 use nexus_core::search::SearchResult;
 use nexus_agent::cli_detector::{self, DetectedAgent};
-use nexus_agent::cli_bridge::SidecarManager;
+use nexus_agent::cli_bridge::{SidecarManager, BridgeResponse};
 use nexus_agent::session::{SessionManager, SessionMeta};
 use nexus_agent::prompt::{PromptLoader, PromptContext};
 use tauri::{AppHandle, Emitter, State};
+use tokio::sync::oneshot;
+
+/// Per-session completion channels: notified when result/cancelled/error arrives.
+type PendingMessages = Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>;
 
 struct AppState {
     pool: DbPool,
-    session_manager: SessionManager,
+    session_manager: Arc<SessionManager>,
     prompt_loader: PromptLoader,
-    sidecar: SidecarManager,
+    sidecar: Arc<SidecarManager>,
+    pending_messages: PendingMessages,
+    reader_started: Arc<AtomicBool>,
+}
+
+/// Background reader thread: reads all sidecar responses, routes to frontend,
+/// and signals waiting chat_send_message tasks via oneshot channels.
+fn spawn_background_reader(
+    sidecar: Arc<SidecarManager>,
+    app: AppHandle,
+    pending: PendingMessages,
+    session_manager: Arc<SessionManager>,
+) {
+    let Some(mut reader) = sidecar.take_reader() else {
+        eprintln!("[reader] Failed to take reader — background reader not started");
+        return;
+    };
+
+    std::thread::spawn(move || {
+        loop {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => {
+                    eprintln!("[reader] Sidecar EOF — process exited");
+                    break;
+                }
+                Ok(_) => {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue; // skip blank lines, not EOF
+                    }
+                    let resp: BridgeResponse = match serde_json::from_str(trimmed) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("[reader] JSON parse error: {} (line: {})", e, trimmed);
+                            continue;
+                        }
+                    };
+
+                    // Skip init acks — they would reset frontend status mid-stream
+                    if resp.msg_type == "init" {
+                        continue;
+                    }
+
+                    let session_id = resp.session_id.clone();
+                    let is_terminal = matches!(
+                        resp.msg_type.as_str(),
+                        "result" | "error" | "cancelled"
+                    );
+
+                    // Emit to the correct session's frontend channel
+                    let _ = app.emit(&format!("chat-stream:{}", session_id), &resp);
+
+                    if is_terminal {
+                        let success = resp.msg_type == "result";
+                        if success {
+                            let _ = session_manager.increment_message_count(&session_id);
+                        }
+                        if let Ok(mut pending) = pending.lock() {
+                            if let Some(tx) = pending.remove(&session_id) {
+                                let _ = tx.send(success);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[reader] Read error: {}", e);
+                    break;
+                }
+            }
+        }
+    });
 }
 
 #[tauri::command]
@@ -595,6 +675,16 @@ async fn chat_start_session(
     // Ensure sidecar is running
     state.sidecar.ensure_running().map_err(|e| e.to_string())?;
 
+    // Spawn background reader once (atomic flag ensures single spawn)
+    if !state.reader_started.swap(true, Ordering::SeqCst) {
+        spawn_background_reader(
+            state.sidecar.clone(),
+            app.clone(),
+            state.pending_messages.clone(),
+            state.session_manager.clone(),
+        );
+    }
+
     // Build system prompt
     let context = PromptContext {
         project_name,
@@ -607,10 +697,8 @@ async fn chat_start_session(
         .build_system_prompt("librarian", &context)
         .map_err(|e| e.to_string())?;
 
-    // Build MCP server config
     let mcp_server_path = which_nexus_mcp();
 
-    // Send start request
     let start_req = serde_json::json!({
         "type": "start",
         "sessionId": session_id,
@@ -624,72 +712,39 @@ async fn chat_start_session(
     });
 
     state.sidecar.send_request(&start_req).map_err(|e| e.to_string())?;
-
-    // Read init response
-    if let Some(resp) = state.sidecar.read_response().map_err(|e| e.to_string())? {
-        let _ = app.emit("chat-stream", &resp);
-    }
-
+    // init ack is consumed by background reader and skipped (no frontend noise)
     Ok(())
 }
 
 #[tauri::command]
 async fn chat_send_message(
-    app: AppHandle,
     state: State<'_, AppState>,
     session_id: String,
     message: String,
 ) -> Result<(), String> {
-    // Ensure sidecar is running (in case start_session wasn't called or sidecar crashed)
     state.sidecar.ensure_running().map_err(|e| e.to_string())?;
 
-    // Send message request
+    // Register a oneshot channel — background reader will fire it on result/error/cancelled
+    let (tx, rx) = oneshot::channel::<bool>();
+    {
+        let mut pending = state.pending_messages.lock().unwrap();
+        pending.insert(session_id.clone(), tx);
+    }
+
     let msg_req = serde_json::json!({
         "type": "message",
         "sessionId": session_id,
         "content": message
     });
 
-    state.sidecar.send_request(&msg_req).map_err(|e| e.to_string())?;
-
-    // Read and emit streaming responses until result/error
-    loop {
-        match state.sidecar.read_response() {
-            Ok(Some(resp)) => {
-                let is_terminal = resp.msg_type == "result" || resp.msg_type == "error";
-                let _ = app.emit("chat-stream", &resp);
-                if is_terminal {
-                    // Increment message count on success
-                    if resp.msg_type == "result" {
-                        let _ = state.session_manager.increment_message_count(&session_id);
-                    }
-                    break;
-                }
-            }
-            Ok(None) => {
-                // EOF — sidecar exited
-                let _ = app.emit("chat-stream", serde_json::json!({
-                    "type": "error",
-                    "sessionId": session_id,
-                    "code": "sidecar_exit",
-                    "message": "사서 프로세스가 종료되었습니다",
-                    "retryable": true
-                }));
-                break;
-            }
-            Err(e) => {
-                let _ = app.emit("chat-stream", serde_json::json!({
-                    "type": "error",
-                    "sessionId": session_id,
-                    "code": "read_error",
-                    "message": e.to_string(),
-                    "retryable": true
-                }));
-                break;
-            }
-        }
+    if let Err(e) = state.sidecar.send_request(&msg_req) {
+        // Clean up the dangling sender before returning
+        state.pending_messages.lock().unwrap().remove(&session_id);
+        return Err(e.to_string());
     }
 
+    // Await terminal event — background reader fires this
+    let _ = rx.await;
     Ok(())
 }
 
@@ -800,7 +855,7 @@ fn main() {
     // Sidecar script path resolution
     let sidecar_script = find_sidecar_script();
     eprintln!("Sidecar script: {}", sidecar_script.display());
-    let sidecar = SidecarManager::new(sidecar_script);
+    let sidecar = Arc::new(SidecarManager::new(sidecar_script));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -809,9 +864,11 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .manage(AppState {
             pool,
-            session_manager,
+            session_manager: Arc::new(session_manager),
             prompt_loader,
             sidecar,
+            pending_messages: Arc::new(Mutex::new(HashMap::new())),
+            reader_started: Arc::new(AtomicBool::new(false)),
         })
         .invoke_handler(tauri::generate_handler![
             list_projects,

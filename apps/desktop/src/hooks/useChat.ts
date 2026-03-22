@@ -39,75 +39,99 @@ export function useChat(options: UseChatOptions = {}) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Record<string, ChatMessage[]>>({});
-  const [status, setStatus] = useState<AgentStatus>("idle");
-  const [toolInfo, setToolInfo] = useState<string | null>(null);
+  // Per-session status and toolInfo
+  const [sessionStatus, setSessionStatus] = useState<Record<string, AgentStatus>>({});
+  const [sessionToolInfo, setSessionToolInfo] = useState<Record<string, string | null>>({});
   const [error, setError] = useState<string | null>(null);
 
-  // Accumulate streaming text for current response
-  const streamBuffer = useRef<string>("");
+  const setStatus = (sid: string, s: AgentStatus) =>
+    setSessionStatus((prev) => ({ ...prev, [sid]: s }));
+  const setToolInfo = (sid: string, t: string | null) =>
+    setSessionToolInfo((prev) => ({ ...prev, [sid]: t }));
 
-  // Listen for chat-stream events
+  const activeSessionIdRef = useRef<string | null>(null);
   useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
 
-    listen<BridgeResponse>("chat-stream", (event) => {
-      const msg = event.payload;
-      if (!msg.sessionId) return;
+  // Listen to ALL sessions so background streaming is never lost.
+  // status/toolInfo/error only update when the event is for the active session.
+  useEffect(() => {
+    if (sessions.length === 0) return;
 
-      switch (msg.type) {
-        case "init":
-          setStatus("idle");
-          break;
+    let cancelled = false;
+    const unlisteners: UnlistenFn[] = [];
 
-        case "thought":
-          // Could display thinking indicator
-          break;
+    const setupListeners = async () => {
+      const promises = sessions.map((session) => {
+        const sid = session.id;
+        return listen<BridgeResponse>(`chat-stream:${sid}`, (event) => {
+          const msg = event.payload;
+          const isActive = activeSessionIdRef.current === sid;
 
-        case "tool_use":
-          if (msg.status === "running") {
-            setStatus("generating");
-            const inputStr = msg.input
-              ? `(${Object.values(msg.input).join(", ")})`
-              : "";
-            setToolInfo(`${msg.toolName} ${inputStr}`);
-          } else {
-            setToolInfo(null);
+          switch (msg.type) {
+            case "thought":
+              break;
+
+            case "tool_use":
+              if (msg.status === "running") {
+                setStatus(sid, "generating");
+                const inputStr = msg.input
+                  ? `(${Object.values(msg.input).join(", ")})`
+                  : "";
+                setToolInfo(sid, `${msg.toolName} ${inputStr}`);
+              } else {
+                setToolInfo(sid, null);
+              }
+              break;
+
+            case "text":
+              setStatus(sid, "generating");
+              setToolInfo(sid, null);
+              updateLastAssistant(sid, msg.content || "");
+              break;
+
+            case "result":
+              setStatus(sid, "done");
+              setToolInfo(sid, null);
+              setTimeout(() => setStatus(sid, "idle"), 500);
+              if (msg.content) {
+                updateLastAssistant(sid, msg.content);
+              }
+              break;
+
+            case "cancelled":
+              setStatus(sid, "idle");
+              setToolInfo(sid, null);
+              break;
+
+            case "error":
+              setStatus(sid, "error");
+              setToolInfo(sid, null);
+              if (isActive) {
+                setError(msg.message || "알 수 없는 에러");
+              }
+              break;
           }
-          break;
+        });
+      });
 
-        case "text":
-          setStatus("generating");
-          setToolInfo(null);
-          // Update the last assistant message with accumulated text
-          streamBuffer.current = msg.content || "";
-          updateLastAssistant(msg.sessionId, streamBuffer.current);
-          break;
-
-        case "result":
-          setStatus("done");
-          setToolInfo(null);
-          // Final content
-          if (msg.content) {
-            updateLastAssistant(msg.sessionId, msg.content);
-          }
-          // Reset after brief delay
-          setTimeout(() => setStatus("idle"), 500);
-          break;
-
-        case "error":
-          setStatus("error");
-          setToolInfo(null);
-          setError(msg.message || "알 수 없는 에러");
-          break;
+      // Wait for ALL listeners to be registered before any can be missed
+      const fns = await Promise.all(promises);
+      if (cancelled) {
+        fns.forEach((fn) => fn());
+      } else {
+        unlisteners.push(...fns);
       }
-    }).then((fn) => {
-      unlisten = fn;
-    });
+    };
+
+    setupListeners();
 
     return () => {
-      if (unlisten) unlisten();
+      cancelled = true;
+      unlisteners.forEach((fn) => fn());
     };
-  }, []);
+  }, [sessions]);
 
   function updateLastAssistant(sessionId: string, content: string) {
     setMessages((prev) => {
@@ -206,6 +230,16 @@ export function useChat(options: UseChatOptions = {}) {
         delete next[sessionId];
         return next;
       });
+      setSessionStatus((prev) => {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      });
+      setSessionToolInfo((prev) => {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      });
       if (activeSessionId === sessionId) {
         setActiveSessionId(null);
       }
@@ -235,9 +269,7 @@ export function useChat(options: UseChatOptions = {}) {
 
   const switchSession = useCallback(async (sessionId: string, session?: SessionMeta) => {
     setActiveSessionId(sessionId);
-    setStatus("idle");
     setError(null);
-    setToolInfo(null);
     // 세션 전환 시 sidecar에 start 요청 (이미 등록되어 있으면 무시됨)
     if (session) {
       try {
@@ -284,9 +316,8 @@ export function useChat(options: UseChatOptions = {}) {
         ],
       }));
 
-      setStatus("generating");
+      setStatus(activeSessionId, "generating");
       setError(null);
-      streamBuffer.current = "";
 
       try {
         await invoke("chat_send_message", {
@@ -294,7 +325,7 @@ export function useChat(options: UseChatOptions = {}) {
           message: content,
         });
       } catch (e) {
-        setStatus("error");
+        setStatus(activeSessionId, "error");
         setError(String(e));
       }
     },
@@ -315,6 +346,8 @@ export function useChat(options: UseChatOptions = {}) {
     : [];
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
+  const status: AgentStatus = (activeSessionId ? sessionStatus[activeSessionId] : null) ?? "idle";
+  const toolInfo: string | null = (activeSessionId ? sessionToolInfo[activeSessionId] : null) ?? null;
 
   return {
     agents,
@@ -325,6 +358,7 @@ export function useChat(options: UseChatOptions = {}) {
     status,
     toolInfo,
     error,
+    sessionStatus,
     detectAgents,
     loadSessions,
     createSession,
