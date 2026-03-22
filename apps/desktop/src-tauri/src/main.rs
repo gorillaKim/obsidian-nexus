@@ -94,6 +94,20 @@ fn spawn_background_reader(
                 }
             }
         }
+
+        // Sidecar exited or errored — unblock any waiting chat_send_message calls
+        if let Ok(mut pending) = pending.lock() {
+            for (sid, tx) in pending.drain() {
+                let _ = app.emit(&format!("chat-stream:{}", sid), serde_json::json!({
+                    "type": "error",
+                    "sessionId": sid,
+                    "code": "sidecar_exit",
+                    "message": "사이드카 프로세스가 종료되었습니다",
+                    "retryable": true
+                }));
+                let _ = tx.send(false);
+            }
+        }
     });
 }
 

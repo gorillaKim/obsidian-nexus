@@ -54,83 +54,87 @@ export function useChat(options: UseChatOptions = {}) {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
 
-  // Listen to ALL sessions so background streaming is never lost.
-  // status/toolInfo/error only update when the event is for the active session.
+  // Incremental listener map: sessionId → unlisten fn
+  // Never fully torn down — only adds new sessions, removes deleted ones.
+  const listenersRef = useRef<Map<string, UnlistenFn>>(new Map());
+
+  // Incrementally manage per-session listeners.
+  // On sessions change: subscribe to NEW sessions, unsubscribe from REMOVED sessions.
+  // Listeners are never all torn down at once — no gap where events can be missed.
   useEffect(() => {
-    if (sessions.length === 0) return;
+    const listeners = listenersRef.current;
+    const currentIds = new Set(sessions.map((s) => s.id));
 
-    let cancelled = false;
-    const unlisteners: UnlistenFn[] = [];
-
-    const setupListeners = async () => {
-      const promises = sessions.map((session) => {
-        const sid = session.id;
-        return listen<BridgeResponse>(`chat-stream:${sid}`, (event) => {
-          const msg = event.payload;
-          const isActive = activeSessionIdRef.current === sid;
-
-          switch (msg.type) {
-            case "thought":
-              break;
-
-            case "tool_use":
-              if (msg.status === "running") {
-                setStatus(sid, "generating");
-                const inputStr = msg.input
-                  ? `(${Object.values(msg.input).join(", ")})`
-                  : "";
-                setToolInfo(sid, `${msg.toolName} ${inputStr}`);
-              } else {
-                setToolInfo(sid, null);
-              }
-              break;
-
-            case "text":
-              setStatus(sid, "generating");
-              setToolInfo(sid, null);
-              updateLastAssistant(sid, msg.content || "");
-              break;
-
-            case "result":
-              setStatus(sid, "done");
-              setToolInfo(sid, null);
-              setTimeout(() => setStatus(sid, "idle"), 500);
-              if (msg.content) {
-                updateLastAssistant(sid, msg.content);
-              }
-              break;
-
-            case "cancelled":
-              setStatus(sid, "idle");
-              setToolInfo(sid, null);
-              break;
-
-            case "error":
-              setStatus(sid, "error");
-              setToolInfo(sid, null);
-              if (isActive) {
-                setError(msg.message || "알 수 없는 에러");
-              }
-              break;
-          }
-        });
-      });
-
-      // Wait for ALL listeners to be registered before any can be missed
-      const fns = await Promise.all(promises);
-      if (cancelled) {
-        fns.forEach((fn) => fn());
-      } else {
-        unlisteners.push(...fns);
+    // Remove listeners for sessions that no longer exist
+    for (const [sid, unlisten] of listeners) {
+      if (!currentIds.has(sid)) {
+        unlisten();
+        listeners.delete(sid);
       }
-    };
+    }
 
-    setupListeners();
+    // Add listeners for new sessions
+    const newSessions = sessions.filter((s) => !listeners.has(s.id));
+    if (newSessions.length === 0) return;
 
-    return () => {
-      cancelled = true;
-      unlisteners.forEach((fn) => fn());
-    };
+    const promises = newSessions.map((session) => {
+      const sid = session.id;
+      return listen<BridgeResponse>(`chat-stream:${sid}`, (event) => {
+        const msg = event.payload;
+        const isActive = activeSessionIdRef.current === sid;
+
+        switch (msg.type) {
+          case "thought":
+            break;
+
+          case "tool_use":
+            if (msg.status === "running") {
+              setStatus(sid, "generating");
+              const inputStr = msg.input
+                ? `(${Object.values(msg.input).join(", ")})`
+                : "";
+              setToolInfo(sid, `${msg.toolName} ${inputStr}`);
+            } else {
+              setToolInfo(sid, null);
+            }
+            break;
+
+          case "text":
+            setStatus(sid, "generating");
+            setToolInfo(sid, null);
+            updateLastAssistant(sid, msg.content || "");
+            break;
+
+          case "result":
+            setStatus(sid, "done");
+            setToolInfo(sid, null);
+            setTimeout(() => setStatus(sid, "idle"), 500);
+            if (msg.content) {
+              updateLastAssistant(sid, msg.content);
+            }
+            break;
+
+          case "cancelled":
+            setStatus(sid, "idle");
+            setToolInfo(sid, null);
+            break;
+
+          case "error":
+            setStatus(sid, "error");
+            setToolInfo(sid, null);
+            if (isActive) {
+              setError(msg.message || "알 수 없는 에러");
+            }
+            break;
+        }
+      });
+    });
+
+    Promise.all(promises).then((fns) => {
+      fns.forEach((fn, i) => {
+        listeners.set(newSessions[i].id, fn);
+      });
+    });
   }, [sessions]);
 
   function updateLastAssistant(sessionId: string, content: string) {
