@@ -359,6 +359,12 @@ export function ChatPanel({
                               );
                             },
                             pre: ({ children }) => <>{children}</>,
+                            table: ({ children }) => <div className="overflow-x-auto my-2"><table className="w-full text-xs border-collapse border border-[var(--border)]">{children}</table></div>,
+                            thead: ({ children }) => <thead className="bg-[var(--bg-secondary)]">{children}</thead>,
+                            tbody: ({ children }) => <tbody>{children}</tbody>,
+                            tr: ({ children }) => <tr className="border-b border-[var(--border)] last:border-0">{children}</tr>,
+                            th: ({ children }) => <th className="px-3 py-1.5 text-left font-semibold text-[var(--text-primary)] border-r border-[var(--border)] last:border-0">{children}</th>,
+                            td: ({ children }) => <td className="px-3 py-1.5 text-[var(--text-secondary)] border-r border-[var(--border)] last:border-0">{children}</td>,
                             blockquote: ({ children }) => <blockquote className="border-l-2 border-[var(--accent)] pl-3 my-2 text-[var(--text-secondary)] italic">{children}</blockquote>,
                             strong: ({ children }) => <strong className="font-semibold text-[var(--text-primary)]">{children}</strong>,
                             a: ({ href, children }) => <a href={href} className="text-[var(--accent)] underline hover:opacity-80">{children}</a>,
