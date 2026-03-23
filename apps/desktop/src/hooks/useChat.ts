@@ -162,6 +162,11 @@ export function useChat(options: UseChatOptions = {}) {
     }
   }, []);
 
+  // Destructure primitive values to avoid infinite loop:
+  // passing `options` object directly causes useCallback to re-create on every render
+  // because a new object literal ({}) !== ({}) even with same values.
+  const { projectName, projectPath, docCount, topTags } = options;
+
   const loadSessions = useCallback(async () => {
     try {
       const list = await invoke<SessionMeta[]>("chat_list_sessions");
@@ -175,10 +180,10 @@ export function useChat(options: UseChatOptions = {}) {
           await invoke("chat_start_session", {
             sessionId: first.id,
             model: first.model,
-            projectName: options.projectName || "default",
-            projectPath: options.projectPath || "",
-            docCount: options.docCount || 0,
-            topTags: options.topTags || [],
+            projectName: projectName || "default",
+            projectPath: projectPath || "",
+            docCount: docCount || 0,
+            topTags: topTags || [],
           });
         } catch {
           // best-effort: 이미 실행 중이거나 sidecar 미실행 상태
@@ -189,7 +194,7 @@ export function useChat(options: UseChatOptions = {}) {
       setError(String(e));
       return [];
     }
-  }, [options]);
+  }, [projectName, projectPath, docCount, topTags]);
 
   const createSession = useCallback(
     async (cli: string, model: string, projectId: string, name?: string) => {
@@ -210,10 +215,10 @@ export function useChat(options: UseChatOptions = {}) {
         await invoke("chat_start_session", {
           sessionId: session.id,
           model,
-          projectName: options.projectName || "default",
-          projectPath: options.projectPath || "",
-          docCount: options.docCount || 0,
-          topTags: options.topTags || [],
+          projectName: projectName || "default",
+          projectPath: projectPath || "",
+          docCount: docCount || 0,
+          topTags: topTags || [],
         });
 
         return session;
@@ -222,7 +227,7 @@ export function useChat(options: UseChatOptions = {}) {
         return null;
       }
     },
-    [options]
+    [projectName, projectPath, docCount, topTags]
   );
 
   const deleteSession = useCallback(
@@ -280,10 +285,10 @@ export function useChat(options: UseChatOptions = {}) {
         await invoke("chat_start_session", {
           sessionId,
           model: session.model,
-          projectName: options.projectName || "default",
-          projectPath: options.projectPath || "",
-          docCount: options.docCount || 0,
-          topTags: options.topTags || [],
+          projectName: projectName || "default",
+          projectPath: projectPath || "",
+          docCount: docCount || 0,
+          topTags: topTags || [],
         });
       } catch {
         // best-effort

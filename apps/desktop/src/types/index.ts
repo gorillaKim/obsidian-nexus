@@ -70,3 +70,42 @@ export interface ChatMessage {
 }
 
 export type AgentStatus = "idle" | "generating" | "compacting" | "done" | "error";
+
+export interface ComponentStatus {
+  installed: boolean;
+  detail: string | null;
+}
+
+export interface CliAgentStatus {
+  cli: string;
+  installed: boolean;
+  path: string | null;
+  version: string | null;
+  authenticated: boolean;
+  failure_reason: string | null;
+}
+
+export interface CliDiagnostics {
+  cli: string;
+  which_result: string;
+  direct_exec_stdout: string;
+  direct_exec_stderr: string;
+  direct_exec_exit: string;
+  shell_exec_stdout: string;
+  shell_exec_stderr: string;
+  shell_exec_exit: string;
+  shell_used: string;
+  nvm_path: string;
+  nvm_exec_stdout: string;
+  nvm_exec_exit: string;
+  find_cli_path_result: string;
+}
+
+export interface SystemStatus {
+  mcp_binary: ComponentStatus;
+  obs_nexus_binary: ComponentStatus;
+  mcp_registrations: McpStatus[];
+  cli_agents: CliAgentStatus[];
+  ollama: ComponentStatus;
+  obsidian: ComponentStatus;
+}

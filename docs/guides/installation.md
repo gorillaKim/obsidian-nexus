@@ -40,8 +40,8 @@ Obsidian Nexus v0.3.12 — 데스크톱 앱, CLI, MCP 서버의 설치 방법을
 ### CLI + MCP 서버 (Formula)
 
 ```bash
-brew tap gorilla-software/tap
-brew install gorilla-software/tap/obsidian-nexus
+brew tap gorillaKim/nexus
+brew install gorillaKim/nexus/obsidian-nexus
 ```
 
 설치되는 바이너리:
@@ -61,7 +61,7 @@ nexus-mcp-server --version
 ### 데스크톱 앱 (Cask)
 
 ```bash
-brew install --cask gorilla-software/tap/obsidian-nexus
+brew install --cask gorillaKim/nexus/obsidian-nexus
 ```
 
 `Obsidian Nexus.app`이 `/Applications`에 설치됩니다.
@@ -73,7 +73,7 @@ brew upgrade obsidian-nexus          # Formula (CLI)
 brew upgrade --cask obsidian-nexus   # Cask (데스크톱 앱)
 ```
 
-릴리즈 시 Homebrew tap(`gorillaKim/homebrew-nexus`)이 자동으로 업데이트됩니다.
+릴리즈 시 Homebrew tap(`gorillaKim/nexus`)이 자동으로 업데이트됩니다.
 
 ---
 

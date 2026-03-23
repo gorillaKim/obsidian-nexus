@@ -272,8 +272,17 @@ fn register_in_config(config_path: &std::path::Path, mcp_path: &str) -> bool {
     };
 
     // Already registered?
-    if config.get("mcpServers").and_then(|s| s.get("nexus")).is_some() {
-        return true;
+    if let Some(existing) = config.get("mcpServers").and_then(|s| s.get("nexus")) {
+        let existing_path = existing.get("command")
+            .and_then(|c| c.as_str())
+            .map(std::path::Path::new);
+        let is_valid = existing_path.map(|p| {
+            p.exists() && !p.to_string_lossy().contains(' ')
+        }).unwrap_or(false);
+        if is_valid {
+            return true; // 경로 유효 → 그대로 유지
+        }
+        // 경로 무효 또는 공백 포함 → 아래에서 덮어쓰기
     }
 
     let servers = config.as_object_mut().unwrap()
@@ -611,6 +620,383 @@ fn install_cli_symlinks() {
     }
 }
 
+// === System Status ===
+
+#[derive(serde::Serialize)]
+struct SystemStatus {
+    mcp_binary: ComponentStatus,
+    obs_nexus_binary: ComponentStatus,
+    mcp_registrations: Vec<McpStatus>,
+    cli_agents: Vec<CliAgentStatus>,
+    ollama: ComponentStatus,
+    obsidian: ComponentStatus,
+}
+
+#[derive(serde::Serialize)]
+struct ComponentStatus {
+    installed: bool,
+    detail: Option<String>, // path, version, or error detail
+}
+
+#[derive(serde::Serialize)]
+struct CliAgentStatus {
+    cli: String,
+    installed: bool,
+    path: Option<String>,
+    version: Option<String>,
+    authenticated: bool,
+    failure_reason: Option<String>,
+}
+
+fn check_ollama() -> ComponentStatus {
+    // Check if ollama binary exists
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let installed = std::process::Command::new(&shell)
+        .args(["-l", "-c", "which ollama"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !installed {
+        return ComponentStatus { installed: false, detail: None };
+    }
+
+    // Check if ollama server is running
+    let running = std::process::Command::new("curl")
+        .args(["-sf", "--max-time", "1", "http://localhost:11434/api/version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    ComponentStatus {
+        installed: true,
+        detail: Some(if running { "실행 중".to_string() } else { "설치됨 (미실행)".to_string() }),
+    }
+}
+
+fn check_obsidian() -> ComponentStatus {
+    let installed = std::path::Path::new("/Applications/Obsidian.app").exists()
+        || dirs::home_dir()
+            .map(|h| h.join("Applications/Obsidian.app").exists())
+            .unwrap_or(false);
+    ComponentStatus { installed, detail: None }
+}
+
+#[tauri::command]
+async fn system_status() -> SystemStatus {
+    let mcp_binary = {
+        let path = find_mcp_binary();
+        ComponentStatus { installed: path.is_some(), detail: path }
+    };
+
+    let obs_nexus_binary = {
+        let path = find_cli_binary();
+        ComponentStatus { installed: path.is_some(), detail: path }
+    };
+
+    let mcp_registrations = {
+        let home = dirs::home_dir().unwrap_or_default();
+        MCP_TARGETS.iter().map(|t| {
+            let config_path = home.join(t.config_rel);
+            let installed = config_path.parent().map(|p| p.exists()).unwrap_or(false);
+            let registered = if installed && config_path.exists() {
+                std::fs::read_to_string(&config_path).ok()
+                    .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                    .and_then(|v| v.get("mcpServers")?.get("nexus").cloned())
+                    .is_some()
+            } else { false };
+            McpStatus { name: t.name.to_string(), installed, registered }
+        }).collect()
+    };
+
+    let cli_agents = tokio::task::spawn_blocking(|| {
+        let detected = cli_detector::detect_agents();
+
+        detected.into_iter().map(|agent| {
+            let installed = !agent.path.as_os_str().is_empty();
+            CliAgentStatus {
+                cli: agent.cli.to_string(),
+                installed,
+                path: if installed { Some(agent.path.to_string_lossy().to_string()) } else { None },
+                version: if !agent.version.is_empty() { Some(agent.version) } else { None },
+                authenticated: agent.authenticated,
+                failure_reason: agent.failure_reason,
+            }
+        }).collect()
+    }).await.unwrap_or_default();
+
+    let ollama = tokio::task::spawn_blocking(check_ollama).await.unwrap_or(ComponentStatus { installed: false, detail: None });
+    let obsidian = check_obsidian();
+
+    SystemStatus { mcp_binary, obs_nexus_binary, mcp_registrations, cli_agents, ollama, obsidian }
+}
+
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+// === CLI Diagnostics ===
+
+#[derive(serde::Serialize)]
+struct CliDiagnostics {
+    cli: String,
+    which_result: String,
+    direct_exec_stdout: String,
+    direct_exec_stderr: String,
+    direct_exec_exit: String,
+    shell_exec_stdout: String,
+    shell_exec_stderr: String,
+    shell_exec_exit: String,
+    shell_used: String,
+    nvm_path: String,
+    nvm_exec_stdout: String,
+    nvm_exec_exit: String,
+    find_cli_path_result: String,
+}
+
+#[tauri::command]
+async fn diagnose_cli(cli: String) -> CliDiagnostics {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let cli_name = cli.clone();
+    let cli_for_err = cli.clone();
+
+    tokio::task::spawn_blocking(move || {
+        // Step 1: which
+        let which_result = std::process::Command::new(&shell)
+            .args(["-l", "-c", &format!("which {}", cli)])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_else(|e| format!("which failed: {}", e));
+
+        let binary_path = which_result.clone();
+
+        // Step 2: direct execution
+        let (direct_stdout, direct_stderr, direct_exit) = if !binary_path.is_empty() && !binary_path.starts_with("which failed") {
+            std::process::Command::new(&binary_path)
+                .arg("--version")
+                .output()
+                .map(|o| (
+                    String::from_utf8_lossy(&o.stdout).trim().to_string(),
+                    String::from_utf8_lossy(&o.stderr).trim().to_string(),
+                    o.status.to_string(),
+                ))
+                .unwrap_or_else(|e| (String::new(), e.to_string(), "spawn failed".to_string()))
+        } else {
+            (String::new(), "binary not found".to_string(), "N/A".to_string())
+        };
+
+        // Step 3: shell execution with name
+        let (shell_stdout, shell_stderr, shell_exit) = std::process::Command::new(&shell)
+            .args(["-l", "-c", &format!("{} --version", cli_name)])
+            .output()
+            .map(|o| (
+                String::from_utf8_lossy(&o.stdout).trim().to_string(),
+                String::from_utf8_lossy(&o.stderr).trim().to_string(),
+                o.status.to_string(),
+            ))
+            .unwrap_or_else(|e| (String::new(), e.to_string(), "spawn failed".to_string()));
+
+        // Step 4: nvm direct path check
+        let home = dirs::home_dir().unwrap_or_default();
+        let nvm_base = home.join(".nvm/versions/node");
+        let nvm_path = if nvm_base.exists() {
+            let mut entries: Vec<_> = std::fs::read_dir(&nvm_base)
+                .into_iter().flatten().flatten()
+                .map(|e| e.path().join("bin").join(&cli_name))
+                .filter(|p| p.exists())
+                .collect();
+            entries.sort();
+            entries.into_iter().last()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "nvm bin not found".to_string())
+        } else {
+            "~/.nvm not found".to_string()
+        };
+
+        let (nvm_stdout, nvm_exit) = if !nvm_path.starts_with("nvm") && !nvm_path.starts_with("~") {
+            // Run with enriched PATH so node scripts (#!/usr/bin/env node) can find node
+            let nvm_bin_dir = std::path::Path::new(&nvm_path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let current_path = std::env::var("PATH").unwrap_or_default();
+            let enriched_path = format!("{}:{}", nvm_bin_dir, current_path);
+            std::process::Command::new(&nvm_path)
+                .arg("--version")
+                .env("PATH", enriched_path)
+                .output()
+                .map(|o| (
+                    String::from_utf8_lossy(&o.stdout).trim().to_string(),
+                    o.status.to_string(),
+                ))
+                .unwrap_or_else(|e| (e.to_string(), "spawn failed".to_string()))
+        } else {
+            (String::new(), "N/A".to_string())
+        };
+
+        // Step 5: what find_cli_path actually returns
+        let find_result = nexus_agent::cli_detector::find_cli_path_pub(&cli_name)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "None".to_string());
+
+        CliDiagnostics {
+            cli: cli_name,
+            which_result,
+            direct_exec_stdout: direct_stdout,
+            direct_exec_stderr: direct_stderr,
+            direct_exec_exit: direct_exit,
+            shell_exec_stdout: shell_stdout,
+            shell_exec_stderr: shell_stderr,
+            shell_exec_exit: shell_exit,
+            shell_used: shell,
+            nvm_path,
+            nvm_exec_stdout: nvm_stdout,
+            nvm_exec_exit: nvm_exit,
+            find_cli_path_result: find_result,
+        }
+    }).await.unwrap_or_else(|e| CliDiagnostics {
+        cli: cli_for_err,
+        which_result: format!("task error: {}", e),
+        direct_exec_stdout: String::new(),
+        direct_exec_stderr: String::new(),
+        direct_exec_exit: String::new(),
+        shell_exec_stdout: String::new(),
+        shell_exec_stderr: String::new(),
+        shell_exec_exit: String::new(),
+        shell_used: String::new(),
+        nvm_path: String::new(),
+        nvm_exec_stdout: String::new(),
+        nvm_exec_exit: String::new(),
+        find_cli_path_result: String::new(),
+    })
+}
+
+// === Connectivity Tests ===
+
+#[derive(serde::Serialize)]
+struct TestResult {
+    ok: bool,
+    message: String,
+}
+
+#[tauri::command]
+async fn test_mcp() -> TestResult {
+    let binary = match find_mcp_binary() {
+        Some(p) => p,
+        None => return TestResult { ok: false, message: "MCP 바이너리를 찾을 수 없습니다".to_string() },
+    };
+
+    // Send JSON-RPC initialize request via stdin, read response from stdout
+    let request = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"nexus-test","version":"0.0.1"}}}"#;
+
+    let result = tokio::task::spawn_blocking(move || {
+        use std::io::{Write, BufRead, BufReader};
+        let mut child = std::process::Command::new(&binary)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+
+        // Send request then drop stdin to signal EOF to the server
+        if let Some(mut stdin) = child.stdin.take() {
+            writeln!(stdin, "{}", request)?;
+        }
+
+        // Read first non-empty line from stdout (MCP responds line-by-line)
+        let stdout = child.stdout.take().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::Other, "no stdout")
+        })?;
+
+        let mut reader = BufReader::new(stdout);
+        let mut response = String::new();
+        let start = std::time::Instant::now();
+
+        loop {
+            if start.elapsed().as_secs() >= 5 {
+                let _ = child.kill();
+                return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout"));
+            }
+            response.clear();
+            match reader.read_line(&mut response) {
+                Ok(0) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Ok(_) if response.trim().is_empty() => continue,
+                Ok(_) => {
+                    let _ = child.kill();
+                    return Ok(response);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }).await;
+
+    match result {
+        Ok(Ok(stdout)) if stdout.contains("\"result\"") => {
+            TestResult { ok: true, message: "MCP 서버 응답 정상".to_string() }
+        }
+        Ok(Ok(stdout)) if stdout.contains("\"error\"") => {
+            TestResult { ok: false, message: format!("MCP 서버 오류 응답: {}", &stdout[..stdout.len().min(120)]) }
+        }
+        Ok(Ok(_)) => TestResult { ok: false, message: "MCP 서버 응답 없음".to_string() },
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::TimedOut => {
+            TestResult { ok: false, message: "MCP 서버 응답 시간 초과 (3초)".to_string() }
+        }
+        Ok(Err(e)) => TestResult { ok: false, message: format!("실행 오류: {}", e) },
+        Err(e) => TestResult { ok: false, message: format!("내부 오류: {}", e) },
+    }
+}
+
+#[tauri::command]
+async fn test_cli(cli: String) -> TestResult {
+    let cli_name = cli.clone();
+    // Use find_cli_path_pub which applies is_executable_script filtering,
+    // ensuring we never try to run a binary with a broken shebang interpreter.
+    // Fall back to bare name only if nothing else found (e.g., native binary in PATH).
+    let binary_path = find_sidecar(&cli)
+        .or_else(|| {
+            cli_detector::find_cli_path_pub(&cli)
+                .map(|p| p.to_string_lossy().to_string())
+        })
+        .unwrap_or(cli.clone());
+
+    let result = tokio::task::spawn_blocking(move || {
+        // Prepend the binary's parent dir to PATH so that nvm/volta node scripts
+        // (#!/usr/bin/env node) can resolve their interpreter from the same bin/ dir.
+        let enriched_path = std::path::Path::new(&binary_path)
+            .parent()
+            .map(|p| {
+                let cur = std::env::var("PATH").unwrap_or_default();
+                format!("{}:{}", p.display(), cur)
+            })
+            .unwrap_or_else(|| std::env::var("PATH").unwrap_or_default());
+        std::process::Command::new(&binary_path)
+            .arg("--version")
+            .env("PATH", enriched_path)
+            .output()
+    }).await;
+
+    match result {
+        Ok(Ok(output)) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if output.status.success() && !stdout.is_empty() {
+                TestResult { ok: true, message: stdout }
+            } else if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let detail = if !stderr.is_empty() { stderr } else { stdout };
+                TestResult { ok: false, message: format!("{} 실행 실패: {}", cli_name, detail) }
+            } else {
+                TestResult { ok: false, message: format!("{} 응답 없음", cli_name) }
+            }
+        }
+        Ok(Err(e)) => TestResult { ok: false, message: format!("실행 오류: {}", e) },
+        Err(e) => TestResult { ok: false, message: format!("내부 오류: {}", e) },
+    }
+}
+
 // === Agent Commands ===
 
 #[tauri::command]
@@ -853,8 +1239,8 @@ fn which_nexus_mcp() -> std::path::PathBuf {
 fn main() {
     // Auto-setup on first launch
     ensure_obsidian();
-    register_mcp_server();
     install_cli_symlinks();
+    register_mcp_server();
 
     let pool = sqlite::create_pool().expect("Failed to create database pool");
     sqlite::run_migrations(&pool).expect("Failed to run migrations");
@@ -902,6 +1288,11 @@ fn main() {
             mcp_path,
             cli_path,
             detect_cli_agents,
+            system_status,
+            open_url,
+            test_mcp,
+            test_cli,
+            diagnose_cli,
             chat_new_session,
             chat_list_sessions,
             chat_delete_session,
