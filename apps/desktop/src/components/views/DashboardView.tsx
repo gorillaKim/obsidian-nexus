@@ -13,7 +13,7 @@ interface DashboardViewProps {
   popularByProject: Map<string, PopularDoc[]>;
   allProjects: { id: string; name: string }[];
   loading: boolean;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (projectId: string, filePath: string) => void;
 }
 
 const RANK_COLORS = ["text-yellow-500", "text-gray-400", "text-orange-400"];
@@ -45,7 +45,7 @@ function RankingList({
 }: {
   docs: PopularDoc[];
   loading: boolean;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (projectId: string, filePath: string) => void;
 }) {
   if (loading) {
     return (
@@ -68,7 +68,7 @@ function RankingList({
       {docs.map((doc, i) => (
         <button
           key={doc.id}
-          onClick={() => onOpenFile(doc.file_path)}
+          onClick={() => onOpenFile(doc.project_id, doc.file_path)}
           className="w-full flex items-center gap-3 py-2 px-3 hover:bg-[var(--bg-secondary)] transition-colors text-left"
         >
           <RankBadge rank={i + 1} />
@@ -137,7 +137,7 @@ export function DashboardView({
       <h2 className="text-xs font-medium text-[var(--text-tertiary)] uppercase tracking-wider mb-3">
         인기 문서 랭킹
       </h2>
-      <Card className="overflow-hidden">
+      <Card className="overflow-visible">
         {/* Tab bar */}
         <div className="flex items-center border-b border-[var(--border)] px-1 relative">
           {/* 전체 탭 */}

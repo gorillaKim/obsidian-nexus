@@ -458,6 +458,9 @@ fn open_file(
             .map(|h| h.join("Applications/Obsidian.app").exists())
             .unwrap_or(false);
 
+    // 열람 기록 (실패해도 무시)
+    nexus_core::search::record_view_by_path(&state.pool, &project_id, &file_path);
+
     if obsidian_installed {
         // Use Obsidian URI with absolute path to avoid vault name conflicts
         // (e.g., multiple vaults named "docs")

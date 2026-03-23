@@ -885,6 +885,21 @@ pub fn resolve_by_alias(pool: &DbPool, project_id: &str, alias: &str) -> Result<
     }
 }
 
+/// 파일 경로로 문서를 조회하여 열람 기록.
+/// 문서가 없거나 실패해도 에러를 반환하지 않음 (fire-and-forget).
+pub fn record_view_by_path(pool: &DbPool, project_id: &str, file_path: &str) {
+    if let Ok(conn) = pool.get() {
+        let doc_id: rusqlite::Result<String> = conn.query_row(
+            "SELECT id FROM documents WHERE project_id = ?1 AND file_path = ?2 LIMIT 1",
+            params![project_id, file_path],
+            |row| row.get(0),
+        );
+        if let Ok(id) = doc_id {
+            let _ = record_view(pool, &id);
+        }
+    }
+}
+
 // ─── 인기 문서 랭킹 ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -892,6 +907,7 @@ pub struct PopularDoc {
     pub id: String,
     pub file_path: String,
     pub title: String,
+    pub project_id: String,
     pub project_name: String,
     pub view_count: i64,
     pub backlink_count: i64,
@@ -919,6 +935,7 @@ pub fn get_popular_documents(
 
     let base_sql = "
         SELECT d.id, d.file_path, COALESCE(d.title, d.file_path) AS title,
+               d.project_id,
                p.name AS project_name,
                COALESCE(vc.view_count, 0) AS view_count,
                COALESCE(bl.backlink_count, 0) AS backlink_count,
@@ -944,11 +961,12 @@ pub fn get_popular_documents(
             id: row.get(0)?,
             file_path: row.get(1)?,
             title: row.get(2)?,
-            project_name: row.get(3)?,
-            view_count: row.get(4)?,
-            backlink_count: row.get(5)?,
-            score: row.get(6)?,
-            last_modified: row.get(7)?,
+            project_id: row.get(3)?,
+            project_name: row.get(4)?,
+            view_count: row.get(5)?,
+            backlink_count: row.get(6)?,
+            score: row.get(7)?,
+            last_modified: row.get(8)?,
         })
     };
 

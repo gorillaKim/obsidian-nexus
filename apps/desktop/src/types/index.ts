@@ -40,6 +40,7 @@ export interface PopularDoc {
   id: string;
   file_path: string;
   title: string;
+  project_id: string;
   project_name: string;
   view_count: number;
   backlink_count: number;

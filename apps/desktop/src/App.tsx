@@ -122,7 +122,7 @@ function App() {
                 popularByProject={popularByProject}
                 allProjects={projectsHook.projects.map((p) => ({ id: p.id, name: p.name }))}
                 loading={dashLoading}
-                onOpenFile={(path) => invoke("open_file", { path })}
+                onOpenFile={(projectId, filePath) => invoke("open_file", { projectId, filePath })}
               />
             )}
 
