@@ -117,16 +117,31 @@ cd apps/desktop && pnpm install && cargo tauri build
 
 ## Setup (설치 후 초기 설정)
 
+### 0. Ollama 설치 (벡터 검색 필수 의존성)
+
+벡터/하이브리드 검색을 사용하려면 Ollama를 **직접 설치**해야 합니다.
+
+```bash
+# macOS
+brew install ollama
+
+# 서비스 시작
+ollama serve
+
+# 임베딩 모델 다운로드 (768차원, ~274MB)
+ollama pull nomic-embed-text
+```
+
+> 키워드 검색만 사용한다면 Ollama 없이도 동작합니다.
+
 ### 1. 초기화
 
 ```bash
 obs-nexus setup
 ```
 
-- Ollama 설치 여부 확인 및 임베딩 모델(`nomic-embed-text`) 다운로드
+- Ollama 연결 확인 및 `nomic-embed-text` 모델 설치 여부 검증
 - 로컬 데이터베이스 초기화 (`~/.nexus/`)
-
-> 벡터 검색이 필요 없다면 Ollama 없이도 키워드 검색은 동작합니다.
 
 ### 2. Obsidian 볼트 등록
 
