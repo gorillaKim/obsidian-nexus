@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar } from "./components/layout/Sidebar";
 import { ChatPanel } from "./components/layout/ChatPanel";
@@ -11,7 +12,7 @@ import { useProjects } from "./hooks/useProjects";
 import { useSearch } from "./hooks/useSearch";
 import { useDocViewer } from "./hooks/useDocViewer";
 import { useProjectTree } from "./hooks/useProjectTree";
-import type { Tab } from "./types";
+import type { Tab, PopularDoc, TopProject } from "./types";
 
 const MIN_CHAT_WIDTH = 280;
 const MAX_CHAT_WIDTH = 640;
@@ -42,10 +43,51 @@ function App() {
   const docViewer = useDocViewer();
   const tree = useProjectTree();
 
+  // 대시보드 인기 문서 상태
+  const [dashLoading, setDashLoading] = useState(false);
+  const [popularAll, setPopularAll] = useState<PopularDoc[]>([]);
+  const [topProjects, setTopProjects] = useState<TopProject[]>([]);
+  const [popularByProject, setPopularByProject] = useState<Map<string, PopularDoc[]>>(new Map());
+
+  const loadDashboard = useCallback(async () => {
+    setDashLoading(true);
+    try {
+      const [allDocs, tops] = await Promise.all([
+        invoke<PopularDoc[]>("get_popular_documents", { limit: 10 }),
+        invoke<TopProject[]>("get_top_projects", { limit: 2 }),
+      ]);
+      setPopularAll(allDocs);
+      setTopProjects(tops);
+
+      // 상위 2개 프로젝트별 랭킹 병렬 로드
+      if (tops.length > 0) {
+        const entries = await Promise.all(
+          tops.map((p) =>
+            invoke<PopularDoc[]>("get_popular_documents", { projectId: p.id, limit: 10 }).then(
+              (docs) => [p.id, docs] as [string, PopularDoc[]]
+            )
+          )
+        );
+        setPopularByProject(new Map(entries));
+      }
+    } catch (e) {
+      console.error("dashboard load failed", e);
+    } finally {
+      setDashLoading(false);
+    }
+  }, []);
+
   const handleTabChange = (newTab: Tab) => {
     setTab(newTab);
     docViewer.closeDoc();
+    if (newTab === "dashboard") loadDashboard();
   };
+
+  // 최초 마운트 시 대시보드 탭이 기본이면 로드
+  useEffect(() => {
+    if (tab === "dashboard") loadDashboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="h-screen flex overflow-hidden bg-[var(--bg-primary)]">
@@ -70,11 +112,17 @@ function App() {
           >
             {tab === "dashboard" && (
               <DashboardView
-                projects={projectsHook.projects}
-                projectInfos={projectsHook.projectInfos}
+                totalProjects={projectsHook.projects.length}
                 totalDocs={projectsHook.totalDocs}
-                indexing={projectsHook.indexing}
-                onIndex={projectsHook.handleIndex}
+                totalChunks={Array.from(projectsHook.projectInfos.values()).reduce(
+                  (sum, info) => sum + info.stats.chunk_count, 0
+                )}
+                popularAll={popularAll}
+                topProjects={topProjects}
+                popularByProject={popularByProject}
+                allProjects={projectsHook.projects.map((p) => ({ id: p.id, name: p.name }))}
+                loading={dashLoading}
+                onOpenFile={(path) => invoke("open_file", { path })}
               />
             )}
 

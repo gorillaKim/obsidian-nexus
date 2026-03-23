@@ -36,6 +36,23 @@ export interface DocItem {
   title: string | null;
 }
 
+export interface PopularDoc {
+  id: string;
+  file_path: string;
+  title: string;
+  project_name: string;
+  view_count: number;
+  backlink_count: number;
+  score: number;
+  last_modified: string | null;
+}
+
+export interface TopProject {
+  id: string;
+  name: string;
+  activity: number;
+}
+
 export interface McpStatus {
   name: string;
   installed: boolean;

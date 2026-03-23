@@ -885,6 +885,129 @@ pub fn resolve_by_alias(pool: &DbPool, project_id: &str, alias: &str) -> Result<
     }
 }
 
+// ─── 인기 문서 랭킹 ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PopularDoc {
+    pub id: String,
+    pub file_path: String,
+    pub title: String,
+    pub project_name: String,
+    pub view_count: i64,
+    pub backlink_count: i64,
+    pub score: f64,
+    pub last_modified: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopProject {
+    pub id: String,
+    pub name: String,
+    pub activity: i64,
+}
+
+/// 인기 문서 랭킹 조회.
+/// score = view_count * 0.6 + backlink_count * 0.4
+/// score가 모두 0이면 last_modified DESC 기준으로 최신 문서 정렬.
+pub fn get_popular_documents(
+    pool: &DbPool,
+    project_id: Option<&str>,
+    limit: usize,
+) -> Result<Vec<PopularDoc>> {
+    let conn = pool.get()?;
+    let limit_i = limit as i64;
+
+    let base_sql = "
+        SELECT d.id, d.file_path, COALESCE(d.title, d.file_path) AS title,
+               p.name AS project_name,
+               COALESCE(vc.view_count, 0) AS view_count,
+               COALESCE(bl.backlink_count, 0) AS backlink_count,
+               (COALESCE(vc.view_count, 0) * 0.6 + COALESCE(bl.backlink_count, 0) * 0.4) AS score,
+               d.last_indexed
+        FROM documents d
+        JOIN projects p ON d.project_id = p.id
+        LEFT JOIN (
+            SELECT document_id, COUNT(*) AS view_count
+            FROM document_views
+            GROUP BY document_id
+        ) vc ON vc.document_id = d.id
+        LEFT JOIN (
+            SELECT target_doc_id, COUNT(*) AS backlink_count
+            FROM wiki_links
+            WHERE target_doc_id IS NOT NULL
+            GROUP BY target_doc_id
+        ) bl ON bl.target_doc_id = d.id
+        WHERE d.indexing_status = 'indexed'";
+
+    let map_row = |row: &rusqlite::Row| -> rusqlite::Result<PopularDoc> {
+        Ok(PopularDoc {
+            id: row.get(0)?,
+            file_path: row.get(1)?,
+            title: row.get(2)?,
+            project_name: row.get(3)?,
+            view_count: row.get(4)?,
+            backlink_count: row.get(5)?,
+            score: row.get(6)?,
+            last_modified: row.get(7)?,
+        })
+    };
+
+    // stmt를 바깥 스코프에 선언해야 MappedRows 라이프타임 에러 회피 가능
+    let sql = if project_id.is_some() {
+        format!("{} AND d.project_id = ?1 ORDER BY score DESC, d.last_indexed DESC LIMIT ?2", base_sql)
+    } else {
+        format!("{} ORDER BY score DESC, d.last_indexed DESC LIMIT ?1", base_sql)
+    };
+    let mut stmt = conn.prepare(&sql)?;
+
+    let docs: Vec<PopularDoc> = if let Some(pid) = project_id {
+        stmt.query_map(params![pid, limit_i], map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    } else {
+        stmt.query_map(params![limit_i], map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    };
+
+    Ok(docs)
+}
+
+/// 활동량 기준 상위 프로젝트 조회 (대시보드 탭 결정용).
+/// activity = 프로젝트 내 총 view_count + backlink_count
+pub fn get_top_projects(pool: &DbPool, limit: usize) -> Result<Vec<TopProject>> {
+    let conn = pool.get()?;
+    let limit_i = limit as i64;
+    let mut stmt = conn.prepare(
+        "SELECT p.id, p.name,
+                (COALESCE(vc.view_total, 0) + COALESCE(bl.link_total, 0)) AS activity
+         FROM projects p
+         LEFT JOIN (
+             SELECT d.project_id, SUM(sub.vc) AS view_total
+             FROM documents d
+             JOIN (SELECT document_id, COUNT(*) AS vc FROM document_views GROUP BY document_id) sub
+                  ON sub.document_id = d.id
+             GROUP BY d.project_id
+         ) vc ON vc.project_id = p.id
+         LEFT JOIN (
+             SELECT d.project_id, COUNT(wl.id) AS link_total
+             FROM documents d
+             JOIN wiki_links wl ON wl.target_doc_id = d.id
+             GROUP BY d.project_id
+         ) bl ON bl.project_id = p.id
+         ORDER BY activity DESC
+         LIMIT ?1",
+    )?;
+    let result = stmt
+        .query_map(params![limit_i], |row| {
+            Ok(TopProject {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                activity: row.get(2)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

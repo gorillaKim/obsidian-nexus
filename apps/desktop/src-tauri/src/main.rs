@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use nexus_core::db::sqlite::{self, DbPool};
 use nexus_core::project::Project;
-use nexus_core::search::SearchResult;
+use nexus_core::search::{PopularDoc, SearchResult, TopProject};
 use nexus_agent::cli_detector::{self, DetectedAgent};
 use nexus_agent::cli_bridge::{SidecarManager, BridgeResponse};
 use nexus_agent::session::{SessionManager, SessionMeta};
@@ -208,6 +208,25 @@ fn project_info(
             "pending_count": stats.pending_count,
         }
     }))
+}
+
+#[tauri::command]
+fn get_popular_documents(
+    state: State<AppState>,
+    project_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<PopularDoc>, String> {
+    nexus_core::search::get_popular_documents(&state.pool, project_id.as_deref(), limit.unwrap_or(10))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_top_projects(
+    state: State<AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<TopProject>, String> {
+    nexus_core::search::get_top_projects(&state.pool, limit.unwrap_or(2))
+        .map_err(|e| e.to_string())
 }
 
 /// Current platform target triple for sidecar binary suffix
@@ -1314,6 +1333,8 @@ fn main() {
             chat_rename_session,
             chat_cancel,
             chat_close_session,
+            get_popular_documents,
+            get_top_projects,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
