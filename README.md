@@ -1,5 +1,7 @@
 # Obsidian Nexus
 
+> v0.3.12 · macOS (Apple Silicon / Intel)
+
 Agent-friendly knowledge search engine for Obsidian vaults.
 
 여러 Obsidian 볼트의 문서를 인덱싱하고, AI 에이전트가 MCP 프로토콜로 검색·탐색할 수 있는 로컬 지식 검색 엔진입니다.
@@ -65,6 +67,18 @@ xattr -cr /Applications/Obsidian\ Nexus.app
 ```
 
 > Desktop 앱 안에 CLI와 MCP 서버가 내장되어 있습니다. CLI만 필요하면 방법 1로 충분합니다.
+
+#### 데스크톱 앱 최초 실행 시 자동 처리
+
+앱을 처음 실행하면 다음을 자동으로 수행합니다:
+
+| 단계 | 동작 |
+|------|------|
+| Obsidian 설치 | 미설치 시 `brew install --cask obsidian` 자동 실행 |
+| MCP 서버 등록 | Claude Desktop / Claude Code / Gemini CLI 설정에 자동 등록 |
+| CLI PATH 설정 | `~/.local/bin/nexus` 심볼릭 링크 생성 + shell rc에 PATH 추가 |
+
+> Ollama는 자동 설치되지 않습니다. 벡터 검색을 사용하려면 별도 설치가 필요합니다 (`obs-nexus setup` 실행 시 안내).
 
 ---
 
@@ -192,6 +206,7 @@ obs-nexus update --force      # 캐시 무시하고 강제 확인
 | `nexus_list_documents` | 볼트 내 문서 목록 |
 | `nexus_index_project` | 인덱싱 트리거 |
 | `nexus_status` | 시스템 상태 확인 |
+| `nexus_onboard` | 프로젝트에 librarian 스킬 자동 설정 |
 
 ---
 
