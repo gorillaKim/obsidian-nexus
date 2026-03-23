@@ -1099,9 +1099,21 @@ async fn chat_start_session(
 
     let mcp_server_path = which_nexus_mcp();
 
+    // Resolve cliType and cliPath from session metadata
+    let session = state
+        .session_manager
+        .get_session(&session_id)
+        .map_err(|e| e.to_string())?;
+    let cli_type = session.cli.to_string();
+    let cli_path = cli_detector::find_cli_path_pub(&cli_type)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| cli_type.clone());
+
     let start_req = serde_json::json!({
         "type": "start",
         "sessionId": session_id,
+        "cliType": cli_type,
+        "cliPath": cli_path,
         "model": model,
         "systemPrompt": system_prompt,
         "mcpServers": {
@@ -1176,11 +1188,11 @@ fn find_sidecar_script() -> std::path::PathBuf {
         // Dev: Tauri runs from src-tauri, cwd is project root
         std::env::current_dir()
             .unwrap_or_default()
-            .join("apps/desktop/sidecar/claude-bridge.mjs"),
+            .join("apps/desktop/sidecar/agent-bridge.mjs"),
         // Dev: relative from src-tauri
-        std::path::PathBuf::from("../sidecar/claude-bridge.mjs"),
+        std::path::PathBuf::from("../sidecar/agent-bridge.mjs"),
         // Dev: relative from workspace root
-        std::path::PathBuf::from("apps/desktop/sidecar/claude-bridge.mjs"),
+        std::path::PathBuf::from("apps/desktop/sidecar/agent-bridge.mjs"),
         // Absolute fallback (project specific)
         std::path::PathBuf::from(
             std::env::var("NEXUS_SIDECAR_PATH")
@@ -1191,9 +1203,9 @@ fn find_sidecar_script() -> std::path::PathBuf {
     // Bundled resource (production): in Resources/sidecar/ (macOS app bundle)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(macos_dir) = exe.parent() {
-            // MacOS/../Resources/sidecar/claude-bridge.mjs
+            // MacOS/../Resources/sidecar/agent-bridge.mjs
             let resources = macos_dir.parent()
-                .map(|p| p.join("Resources/sidecar/claude-bridge.mjs"));
+                .map(|p| p.join("Resources/sidecar/agent-bridge.mjs"));
             if let Some(path) = resources {
                 candidates.insert(0, path);
             }

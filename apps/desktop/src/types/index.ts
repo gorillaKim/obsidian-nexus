@@ -1,3 +1,5 @@
+export type CliType = "claude" | "gemini";
+
 export interface Project {
   id: string;
   name: string;
@@ -46,7 +48,7 @@ export type SearchMode = "hybrid" | "keyword" | "vector";
 
 // Agent / Chat types
 export interface DetectedAgent {
-  cli: "claude" | "gemini";
+  cli: CliType;
   path: string;
   version: string;
   authenticated: boolean;
@@ -55,7 +57,7 @@ export interface DetectedAgent {
 
 export interface SessionMeta {
   id: string;
-  cli: "claude" | "gemini";
+  cli: CliType;
   model: string;
   name: string;
   project_id: string;
@@ -77,7 +79,7 @@ export interface ComponentStatus {
 }
 
 export interface CliAgentStatus {
-  cli: string;
+  cli: CliType;
   installed: boolean;
   path: string | null;
   version: string | null;
