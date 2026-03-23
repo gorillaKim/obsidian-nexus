@@ -126,8 +126,8 @@ export function ChatPanel({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeMessages]);
 
-  // 현재 Claude만 지원 (Gemini는 향후 확장)
-  const supportedAgents = agents.filter((a) => a.cli === "claude");
+  // Claude + Gemini 지원 (설치된 에이전트만 표시)
+  const supportedAgents = agents.filter((a) => a.cli === "claude" || a.cli === "gemini");
 
   useEffect(() => {
     if (supportedAgents.length > 0 && !selectedCli) {
@@ -163,6 +163,12 @@ export function ChatPanel({
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const handleCliChange = (cli: string) => {
+    setSelectedCli(cli);
+    const agent = supportedAgents.find((a) => a.cli === cli);
+    setSelectedModel(agent?.models[0] || "");
   };
 
   const handleCreateSession = async () => {
@@ -281,9 +287,17 @@ export function ChatPanel({
       {showNewSession && hasAgents && (
         <div className="p-3 border-b border-[var(--border)] bg-[var(--bg-tertiary)] flex-shrink-0">
           <div className="flex gap-2 mb-2">
-            <span className="flex items-center px-2 py-1.5 text-xs text-[var(--text-secondary)]">
-              {selectedCli} (v{selectedAgent?.version})
-            </span>
+            <select
+              value={selectedCli}
+              onChange={(e) => handleCliChange(e.target.value)}
+              className="px-2 py-1.5 text-xs rounded-md bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)]"
+            >
+              {supportedAgents.map((a) => (
+                <option key={a.cli} value={a.cli}>
+                  {a.cli} v{a.version}
+                </option>
+              ))}
+            </select>
             <select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}

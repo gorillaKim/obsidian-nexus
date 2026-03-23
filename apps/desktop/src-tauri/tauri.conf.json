@@ -18,6 +18,7 @@
     ],
     "resources": {
       "../sidecar/agent-bridge.mjs": "sidecar/agent-bridge.mjs",
+      "../sidecar/adapters": "sidecar/adapters",
       "../sidecar/node_modules": "sidecar/node_modules",
       "../sidecar/package.json": "sidecar/package.json"
     },
