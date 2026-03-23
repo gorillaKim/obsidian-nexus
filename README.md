@@ -62,9 +62,23 @@ brew upgrade --cask gorillakim/nexus/obsidian-nexus
 
 **"앱이 손상되었습니다" 오류가 뜨면** (macOS Gatekeeper 미서명 차단):
 
+1. 터미널을 열고 아래 명령어 실행:
+
 ```bash
 xattr -cr /Applications/Obsidian\ Nexus.app
 ```
+
+2. 다시 앱을 실행합니다.
+
+명령어가 동작하지 않는 경우 (macOS 15 Sequoia 이상):
+
+```bash
+# 시스템 설정 → 개인정보 보호 및 보안 → 보안 섹션에서 "확인 없이 열기" 버튼 클릭
+# 또는 아래 명령어로 격리 속성만 제거
+sudo xattr -d com.apple.quarantine /Applications/Obsidian\ Nexus.app
+```
+
+> 이 오류는 App Store 외부에서 다운로드한 앱에 macOS가 자동으로 격리(quarantine) 속성을 부여하기 때문입니다. `xattr -cr`은 해당 속성을 제거합니다.
 
 > Desktop 앱 안에 CLI와 MCP 서버가 내장되어 있습니다. CLI만 필요하면 방법 1로 충분합니다.
 
