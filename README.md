@@ -41,24 +41,26 @@ curl -fsSL https://raw.githubusercontent.com/gorillaKim/obsidian-nexus/master/in
 > macOS Command Line Tools 최신 버전 필요. `xcode-select --install` 으로 설치.
 
 ```bash
-brew tap gorillakim/nexus
-brew install --formula gorillakim/nexus/obsidian-nexus   # CLI + MCP 서버
-brew install --cask gorillakim/nexus/obsidian-nexus      # Desktop 앱
+brew tap gorillaKim/nexus
+brew install gorillaKim/nexus/obsidian-nexus      # CLI + MCP 서버 (Formula)
+brew install --cask gorillaKim/nexus/obsidian-nexus   # Desktop 앱 (Cask)
 ```
 
 업데이트:
 ```bash
-brew upgrade --formula gorillakim/nexus/obsidian-nexus
-brew upgrade --cask gorillakim/nexus/obsidian-nexus
+brew upgrade obsidian-nexus           # Formula (CLI + MCP 서버)
+brew upgrade --cask obsidian-nexus    # Cask (Desktop 앱)
 ```
+
+릴리즈 태그 푸시 시 CI가 tap을 자동으로 갱신합니다.
 
 ---
 
 ### 방법 3: Desktop 앱 수동 설치
 
 1. [Releases 페이지](https://github.com/gorillaKim/obsidian-nexus/releases/latest)에서 `Obsidian-Nexus.dmg` 다운로드
-2. DMG 열기 → Applications 폴더로 드래그
-3. 앱 실행
+2. DMG 열기 → `Obsidian Nexus.app`을 `/Applications`로 드래그
+3. 앱 실행 (최초 실행 시 Gatekeeper 경고가 뜰 수 있음 — 아래 참고)
 
 **"앱이 손상되었습니다" 오류가 뜨면** (macOS Gatekeeper 미서명 차단):
 
@@ -160,20 +162,24 @@ obs-nexus setup
 ### 2. Obsidian 볼트 등록
 
 ```bash
-obs-nexus project add --name "my-vault" --path /path/to/obsidian/vault
+obs-nexus project add --name my-notes --path /path/to/obsidian/vault
+
+# 등록 확인
+obs-nexus project list
 ```
 
 ### 3. 문서 인덱싱
 
 ```bash
-obs-nexus index my-vault      # 특정 볼트 인덱싱
-obs-nexus index --all         # 모든 볼트 인덱싱
+obs-nexus index my-notes          # 증분 인덱싱 (변경분만)
+obs-nexus index my-notes --full   # 전체 재인덱싱
+obs-nexus index --all             # 모든 볼트 인덱싱
 ```
 
 ### 4. AI 에이전트(MCP) 연동
 
 ```bash
-# 자동 설정 — .mcp.json 생성 + 에이전트 프롬프트 주입
+# 자동 설정 — .mcp.json + librarian 에이전트 파일 자동 생성
 obs-nexus onboard /path/to/my-project
 ```
 
@@ -190,6 +196,8 @@ obs-nexus onboard /path/to/my-project
   }
 }
 ```
+
+> `command` 값은 `which nexus-mcp-server` 출력으로 대체하세요.
 
 ---
 
@@ -298,9 +306,10 @@ GitHub Actions가 자동으로 빌드 + Release 생성:
 ```bash
 obs-nexus update          # 최신 버전 확인 + 설치
 obs-nexus update --check  # 확인만 (설치 안 함)
+obs-nexus update --force  # 24시간 캐시 무시하고 강제 확인
 ```
 
-MCP 서버(`nexus-mcp-server`)는 CLI 업데이트 시 함께 교체됩니다.
+GitHub Release API로 최신 버전을 확인하고, SHA256 체크섬을 검증한 뒤 atomic 교체합니다. MCP 서버(`nexus-mcp-server`)는 CLI 업데이트 시 함께 교체됩니다.
 
 ### 버전 확인
 
