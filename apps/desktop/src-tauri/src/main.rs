@@ -189,6 +189,8 @@ fn get_document(
     project_id: String,
     file_path: String,
 ) -> Result<String, String> {
+    // 문서 열람 기록 (미리보기 = 조회로 간주)
+    nexus_core::search::record_view_by_path(&state.pool, &project_id, &file_path);
     nexus_core::search::get_document_content(&state.pool, &project_id, &file_path)
         .map_err(|e| e.to_string())
 }

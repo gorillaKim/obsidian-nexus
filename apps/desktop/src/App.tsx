@@ -79,7 +79,7 @@ function App() {
 
   const handleTabChange = (newTab: Tab) => {
     setTab(newTab);
-    docViewer.closeDoc();
+    if (newTab !== "search") docViewer.closeDoc();
     if (newTab === "dashboard") loadDashboard();
   };
 
@@ -123,6 +123,10 @@ function App() {
                 allProjects={projectsHook.projects.map((p) => ({ id: p.id, name: p.name }))}
                 loading={dashLoading}
                 onOpenFile={(projectId, filePath) => invoke("open_file", { projectId, filePath })}
+                onViewDocument={(projectId, filePath) => {
+                  docViewer.viewDocument(projectId, filePath);
+                  setTab("search");
+                }}
               />
             )}
 

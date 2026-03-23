@@ -755,11 +755,16 @@ pub fn filter_by_tags(results: &mut Vec<SearchResult>, tags: &[&str], match_all:
     });
 }
 
-/// Record a document view for popularity tracking
+/// Record a document view for popularity tracking.
+/// 같은 문서는 30분 이내 중복 기록하지 않음 (원자적 단일 쿼리로 TOCTOU 방지).
 pub fn record_view(pool: &DbPool, document_id: &str) -> Result<()> {
     let conn = pool.get()?;
     conn.execute(
-        "INSERT INTO document_views (document_id) VALUES (?1)",
+        "INSERT INTO document_views (document_id)
+         SELECT ?1 WHERE NOT EXISTS (
+             SELECT 1 FROM document_views
+             WHERE document_id = ?1 AND viewed_at > datetime('now', '-30 minutes')
+         )",
         params![document_id],
     )?;
     Ok(())
@@ -895,7 +900,9 @@ pub fn record_view_by_path(pool: &DbPool, project_id: &str, file_path: &str) {
             |row| row.get(0),
         );
         if let Ok(id) = doc_id {
-            let _ = record_view(pool, &id);
+            if let Err(e) = record_view(pool, &id) {
+                tracing::warn!("Failed to record view for document {}: {}", id, e);
+            }
         }
     }
 }
@@ -954,7 +961,7 @@ pub fn get_popular_documents(
             WHERE target_doc_id IS NOT NULL
             GROUP BY target_doc_id
         ) bl ON bl.target_doc_id = d.id
-        WHERE d.indexing_status = 'indexed'";
+        WHERE d.indexing_status = 'done'";
 
     let map_row = |row: &rusqlite::Row| -> rusqlite::Result<PopularDoc> {
         Ok(PopularDoc {

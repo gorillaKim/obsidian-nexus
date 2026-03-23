@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LayoutDashboard, Eye, Link2, ChevronDown } from "lucide-react";
+import { LayoutDashboard, Eye, Link2, ChevronDown, ExternalLink } from "lucide-react";
 import { Card } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
 import type { PopularDoc, TopProject } from "../../types";
@@ -14,6 +14,7 @@ interface DashboardViewProps {
   allProjects: { id: string; name: string }[];
   loading: boolean;
   onOpenFile: (projectId: string, filePath: string) => void;
+  onViewDocument: (projectId: string, filePath: string) => void;
 }
 
 const RANK_COLORS = ["text-yellow-500", "text-gray-400", "text-orange-400"];
@@ -42,10 +43,12 @@ function RankingList({
   docs,
   loading,
   onOpenFile,
+  onViewDocument,
 }: {
   docs: PopularDoc[];
   loading: boolean;
   onOpenFile: (projectId: string, filePath: string) => void;
+  onViewDocument: (projectId: string, filePath: string) => void;
 }) {
   if (loading) {
     return (
@@ -66,13 +69,17 @@ function RankingList({
   return (
     <div className="divide-y divide-[var(--border)]">
       {docs.map((doc, i) => (
-        <button
+        <div
           key={doc.id}
-          onClick={() => onOpenFile(doc.project_id, doc.file_path)}
-          className="w-full flex items-center gap-3 py-2 px-3 hover:bg-[var(--bg-secondary)] transition-colors text-left"
+          className="flex items-center gap-3 py-2 px-3 hover:bg-[var(--bg-secondary)] transition-colors"
         >
           <RankBadge rank={i + 1} />
-          <span className="flex-1 text-sm text-[var(--text-primary)] truncate">{doc.title}</span>
+          <button
+            onClick={() => onViewDocument(doc.project_id, doc.file_path)}
+            className="flex-1 text-sm text-[var(--text-primary)] truncate text-left hover:underline"
+          >
+            {doc.title}
+          </button>
           <span className="text-xs text-[var(--text-tertiary)] truncate max-w-[100px]">{doc.project_name}</span>
           <span className="flex items-center gap-1 text-xs text-[var(--text-tertiary)] min-w-[40px]">
             <Eye size={11} />
@@ -82,7 +89,14 @@ function RankingList({
             <Link2 size={11} />
             {doc.backlink_count}
           </span>
-        </button>
+          <button
+            onClick={() => onOpenFile(doc.project_id, doc.file_path)}
+            className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+            title="Obsidian에서 열기"
+          >
+            <ExternalLink size={12} />
+          </button>
+        </div>
       ))}
     </div>
   );
@@ -98,6 +112,7 @@ export function DashboardView({
   allProjects,
   loading,
   onOpenFile,
+  onViewDocument,
 }: DashboardViewProps) {
   // 탭: "all" | project_id
   const [activeTab, setActiveTab] = useState<string>("all");
@@ -189,7 +204,7 @@ export function DashboardView({
         </div>
 
         {/* Ranking list */}
-        <RankingList docs={currentDocs} loading={loading} onOpenFile={onOpenFile} />
+        <RankingList docs={currentDocs} loading={loading} onOpenFile={onOpenFile} onViewDocument={onViewDocument} />
       </Card>
 
       {/* Empty state when no projects */}
