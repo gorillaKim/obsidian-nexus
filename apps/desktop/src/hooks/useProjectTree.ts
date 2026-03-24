@@ -2,8 +2,15 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { DocItem } from "../types";
 
+export interface TreeNode {
+  name: string;
+  fullPath: string;
+  subfolders: Map<string, TreeNode>;
+  docs: DocItem[];
+}
+
 export interface TreeData {
-  folders: Map<string, DocItem[]>;
+  subfolders: Map<string, TreeNode>;
   rootDocs: DocItem[];
 }
 
@@ -67,19 +74,40 @@ export function useProjectTree() {
   };
 
   const buildTree = (docs: DocItem[]): TreeData => {
-    const folders: Map<string, DocItem[]> = new Map();
     const rootDocs: DocItem[] = [];
+    const subfolders: Map<string, TreeNode> = new Map();
+
+    const getOrCreateNode = (
+      map: Map<string, TreeNode>,
+      name: string,
+      fullPath: string,
+    ): TreeNode => {
+      if (!map.has(name)) {
+        map.set(name, { name, fullPath, subfolders: new Map(), docs: [] });
+      }
+      return map.get(name)!;
+    };
+
     for (const doc of docs) {
       const parts = doc.file_path.split("/");
-      if (parts.length > 1) {
-        const folder = parts.slice(0, -1).join("/");
-        if (!folders.has(folder)) folders.set(folder, []);
-        folders.get(folder)!.push(doc);
-      } else {
+      if (parts.length === 1) {
         rootDocs.push(doc);
+      } else {
+        const folderParts = parts.slice(0, -1);
+        let currentMap = subfolders;
+        for (let i = 0; i < folderParts.length; i++) {
+          const name = folderParts[i];
+          const fullPath = folderParts.slice(0, i + 1).join("/");
+          const node = getOrCreateNode(currentMap, name, fullPath);
+          if (i === folderParts.length - 1) {
+            node.docs.push(doc);
+          }
+          currentMap = node.subfolders;
+        }
       }
     }
-    return { folders, rootDocs };
+
+    return { subfolders, rootDocs };
   };
 
   return {

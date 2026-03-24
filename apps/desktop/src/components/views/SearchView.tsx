@@ -11,7 +11,7 @@ import { Select } from "../ui/Select";
 import { IconButton } from "../ui/IconButton";
 import { Card } from "../ui/Card";
 import type { Project, ProjectInfo, SearchResult, SearchMode, DocItem } from "../../types";
-import type { TreeData } from "../../hooks/useProjectTree";
+import type { TreeData, TreeNode } from "../../hooks/useProjectTree";
 
 interface SearchViewProps {
   // Search state
@@ -60,6 +60,74 @@ const modeLabels: Record<SearchMode, string> = {
   keyword: "키워드",
   vector: "벡터",
 };
+
+interface FolderNodeProps {
+  node: TreeNode;
+  projectId: string;
+  depth: number;
+  expandedFolders: Set<string>;
+  toggleFolder: (key: string) => void;
+  viewDocument: (projectId: string, filePath: string) => void;
+  viewingDoc: { projectId: string; filePath: string; content: string } | null;
+}
+
+function FolderNodeView({
+  node, projectId, depth,
+  expandedFolders, toggleFolder,
+  viewDocument, viewingDoc,
+}: FolderNodeProps) {
+  const folderKey = `${projectId}/${node.fullPath}`;
+  const isOpen = expandedFolders.has(folderKey);
+  const indent = depth * 12;
+
+  return (
+    <div>
+      <div
+        className="flex items-center gap-1 py-0.5 text-xs text-[var(--text-tertiary)] cursor-pointer hover:text-[var(--text-secondary)] transition-colors rounded-md hover:bg-[var(--bg-hover)]"
+        style={{ paddingLeft: `${indent + 8}px` }}
+        onClick={() => toggleFolder(folderKey)}
+      >
+        {isOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+        <FolderOpen size={12} className="flex-shrink-0" />
+        <span className="truncate">{node.name}</span>
+        <span className="ml-auto pr-2 text-[var(--text-tertiary)]">{node.docs.length}</span>
+      </div>
+      {isOpen && (
+        <>
+          {Array.from(node.subfolders.values()).map((child) => (
+            <FolderNodeView
+              key={child.fullPath}
+              node={child}
+              projectId={projectId}
+              depth={depth + 1}
+              expandedFolders={expandedFolders}
+              toggleFolder={toggleFolder}
+              viewDocument={viewDocument}
+              viewingDoc={viewingDoc}
+            />
+          ))}
+          {node.docs.map((doc) => {
+            const isActive = viewingDoc?.filePath === doc.file_path;
+            return (
+              <div
+                key={doc.id}
+                className={cn(
+                  "flex items-center gap-1 py-1 rounded-md cursor-pointer text-xs transition-colors duration-150",
+                  isActive ? "bg-[var(--accent)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
+                )}
+                style={{ paddingLeft: `${indent + 24}px`, paddingRight: "8px" }}
+                onClick={() => viewDocument(projectId, doc.file_path)}
+              >
+                <FileText size={11} className="flex-shrink-0" />
+                <span className="truncate">{doc.title || doc.file_path.split("/").pop()}</span>
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
+}
 
 export function SearchView(props: SearchViewProps) {
   const {
@@ -285,48 +353,30 @@ export function SearchView(props: SearchViewProps) {
                   )}
                 </div>
                 {isExpanded && tree && (
-                  <div className="ml-3">
-                    {Array.from(tree.folders.entries()).map(([folder, folderDocs]) => {
-                      const folderKey = `${p.id}/${folder}`;
-                      const isFolderOpen = expandedFolders.has(folderKey);
-                      return (
-                        <div key={folder} className="mb-0.5">
-                          <div
-                            className="flex items-center gap-1 px-2 py-0.5 text-xs text-[var(--text-tertiary)] cursor-pointer hover:text-[var(--text-secondary)] transition-colors"
-                            onClick={() => toggleFolder(folderKey)}
-                          >
-                            {isFolderOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                            <FolderOpen size={12} />
-                            <span>{folder}</span>
-                            <span className="ml-auto text-[var(--text-tertiary)]">{folderDocs.length}</span>
-                          </div>
-                          {isFolderOpen && folderDocs.map((doc) => {
-                            const isActive = viewingDoc?.filePath === doc.file_path;
-                            return (
-                              <div key={doc.id}
-                                className={cn(
-                                  "flex items-center gap-1 px-4 py-1 rounded-md cursor-pointer text-xs transition-colors duration-150",
-                                  isActive ? "bg-[var(--accent)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
-                                )}
-                                onClick={() => viewDocument(p.id, doc.file_path)}
-                              >
-                                <span className="truncate">{doc.title || doc.file_path.split("/").pop()}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
+                  <div>
+                    {Array.from(tree.subfolders.values()).map((node) => (
+                      <FolderNodeView
+                        key={node.fullPath}
+                        node={node}
+                        projectId={p.id}
+                        depth={1}
+                        expandedFolders={expandedFolders}
+                        toggleFolder={toggleFolder}
+                        viewDocument={viewDocument}
+                        viewingDoc={viewingDoc}
+                      />
+                    ))}
                     {tree.rootDocs.map((doc) => {
                       const isActive = viewingDoc?.filePath === doc.file_path;
                       return (
                         <div key={doc.id}
                           className={cn(
-                            "flex items-center gap-1 px-2 py-1 rounded-md cursor-pointer text-xs transition-colors duration-150",
+                            "flex items-center gap-1 pl-6 pr-2 py-1 rounded-md cursor-pointer text-xs transition-colors duration-150",
                             isActive ? "bg-[var(--accent)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
                           )}
                           onClick={() => viewDocument(p.id, doc.file_path)}
                         >
+                          <FileText size={11} className="flex-shrink-0" />
                           <span className="truncate">{doc.title || doc.file_path}</span>
                         </div>
                       );
