@@ -75,6 +75,15 @@ enum Commands {
         /// Project ID or name (omit to watch all)
         project: Option<String>,
     },
+    /// Show popular document rankings (by view count + backlinks)
+    Ranking {
+        /// Limit to a specific project
+        #[arg(long)]
+        project: Option<String>,
+        /// Max results
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
     /// Check for updates and install new version
     Update {
         /// Only check, don't install
@@ -128,6 +137,9 @@ fn main() -> Result<()> {
         }
         Commands::Watch { project } => {
             commands::watch::handle_watch(&pool, project.as_deref())?;
+        }
+        Commands::Ranking { project, limit } => {
+            commands::ranking::handle_ranking(&pool, project.as_deref(), limit, &cli.format)?;
         }
         Commands::Update { .. } => unreachable!(),
     }

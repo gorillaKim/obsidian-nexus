@@ -1,4 +1,5 @@
 pub mod doc;
+pub mod ranking;
 pub mod index;
 pub mod onboard;
 pub mod project;

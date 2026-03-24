@@ -257,6 +257,17 @@ fn handle_tools_list(id: &Value) -> Value {
                     }
                 },
                 {
+                    "name": "nexus_get_ranking",
+                    "description": "Get popular document rankings by view_count and backlink_count. Use for 'what are the most viewed/linked docs?' queries. Supports global or per-project ranking.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Project ID or name (omit for global ranking)" },
+                            "limit": { "type": "integer", "description": "Max results (default: 10)", "default": 10 }
+                        }
+                    }
+                },
+                {
                     "name": "nexus_onboard",
                     "description": "Set up librarian skill and subagent in a project. Creates .mcp.json, .claude/agents/librarian.md, and .claude/skills/librarian/SKILL.md",
                     "inputSchema": {
@@ -290,6 +301,7 @@ fn handle_tools_call(id: &Value, params: &Value, pool: &nexus_core::db::sqlite::
         "nexus_resolve_alias" => tool_resolve_alias(&args, pool),
         "nexus_status" => Ok(nexus_core::status::get_status(pool)),
         "nexus_help" => Ok(NEXUS_HELP_TEXT.to_string()),
+        "nexus_get_ranking" => tool_get_ranking(&args, pool),
         "nexus_onboard" => tool_onboard(&args),
         _ => Err(format!("Unknown tool: {}", tool_name)),
     };
@@ -438,6 +450,19 @@ fn tool_resolve_alias(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> st
     let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
     let result = nexus_core::search::resolve_by_alias(pool, &proj.id, alias).map_err(|e| e.to_string())?;
     serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
+}
+
+fn tool_get_ranking(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
+    let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10) as usize;
+    let project_id = if let Some(p) = args.get("project").and_then(|p| p.as_str()) {
+        let proj = nexus_core::project::get_project(pool, p).map_err(|e| e.to_string())?;
+        Some(proj.id)
+    } else {
+        None
+    };
+    let docs = nexus_core::search::get_popular_documents(pool, project_id.as_deref(), limit)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&docs).map_err(|e| e.to_string())
 }
 
 fn tool_onboard(args: &Value) -> std::result::Result<String, String> {

@@ -459,3 +459,101 @@ MCP server implementation details.
         );
     }
 }
+
+#[test]
+fn test_get_popular_documents_global() {
+    let pool = test_pool();
+    let vault = TempDir::new().unwrap();
+
+    fs::write(vault.path().join("hot.md"), "# Hot\nPopular document.").unwrap();
+    fs::write(vault.path().join("cold.md"), "# Cold\nRarely seen document.").unwrap();
+
+    let proj = project::add_project(&pool, "rank-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    // Fetch document IDs
+    let conn = pool.get().unwrap();
+    let hot_id: String = conn
+        .query_row("SELECT id FROM documents WHERE file_path = 'hot.md' AND project_id = ?1", [&proj.id], |r| r.get(0))
+        .unwrap();
+    let cold_id: String = conn
+        .query_row("SELECT id FROM documents WHERE file_path = 'cold.md' AND project_id = ?1", [&proj.id], |r| r.get(0))
+        .unwrap();
+
+    // hot.md: 5 views + 2 backlinks  →  5*0.6 + 2*0.4 = 3.8
+    // cold.md: 1 view + 0 backlinks  →  1*0.6 + 0     = 0.6
+    for _ in 0..5 {
+        conn.execute("INSERT INTO document_views (document_id) VALUES (?1)", [&hot_id]).unwrap();
+    }
+    conn.execute("INSERT INTO document_views (document_id) VALUES (?1)", [&cold_id]).unwrap();
+    conn.execute(
+        "INSERT INTO wiki_links (source_doc_id, target_path, target_doc_id) VALUES (?1, 'hot.md', ?2)",
+        [&cold_id, &hot_id],
+    ).unwrap();
+    conn.execute(
+        "INSERT INTO wiki_links (source_doc_id, target_path, target_doc_id) VALUES (?1, 'hot.md', ?2)",
+        [&hot_id, &hot_id],
+    ).unwrap();
+    drop(conn);
+
+    let docs = search::get_popular_documents(&pool, None, 10).unwrap();
+    assert!(!docs.is_empty(), "ranking should return results");
+    assert_eq!(docs[0].file_path, "hot.md", "hot.md should rank first");
+    assert!(docs[0].score > docs[1].score, "hot.md score should be higher");
+}
+
+#[test]
+fn test_get_popular_documents_by_project() {
+    let pool = test_pool();
+    let vault_a = TempDir::new().unwrap();
+    let vault_b = TempDir::new().unwrap();
+
+    fs::write(vault_a.path().join("doc-a.md"), "# Doc A").unwrap();
+    fs::write(vault_b.path().join("doc-b.md"), "# Doc B").unwrap();
+
+    let proj_a = project::add_project(&pool, "proj-a", vault_a.path().to_str().unwrap(), None).unwrap();
+    let proj_b = project::add_project(&pool, "proj-b", vault_b.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj_a.id, false).unwrap();
+    index_engine::index_project(&pool, &proj_b.id, false).unwrap();
+
+    let conn = pool.get().unwrap();
+    let id_a: String = conn
+        .query_row("SELECT id FROM documents WHERE project_id = ?1", [&proj_a.id], |r| r.get(0))
+        .unwrap();
+    let id_b: String = conn
+        .query_row("SELECT id FROM documents WHERE project_id = ?1", [&proj_b.id], |r| r.get(0))
+        .unwrap();
+
+    // Give proj_b doc more views so it would rank higher globally
+    for _ in 0..10 {
+        conn.execute("INSERT INTO document_views (document_id) VALUES (?1)", [&id_b]).unwrap();
+    }
+    conn.execute("INSERT INTO document_views (document_id) VALUES (?1)", [&id_a]).unwrap();
+    drop(conn);
+
+    // Project-scoped ranking must not include proj_b docs
+    let docs_a = search::get_popular_documents(&pool, Some(&proj_a.id), 10).unwrap();
+    assert!(docs_a.iter().all(|d| d.project_id == proj_a.id), "project filter must be respected");
+
+    let docs_b = search::get_popular_documents(&pool, Some(&proj_b.id), 10).unwrap();
+    assert!(docs_b.iter().all(|d| d.project_id == proj_b.id), "project filter must be respected");
+
+    // Global ranking: doc-b should rank first
+    let global = search::get_popular_documents(&pool, None, 10).unwrap();
+    assert_eq!(global[0].file_path, "doc-b.md", "doc-b should rank first globally");
+}
+
+#[test]
+fn test_get_popular_documents_limit() {
+    let pool = test_pool();
+    let vault = TempDir::new().unwrap();
+
+    for i in 0..5 {
+        fs::write(vault.path().join(format!("doc{i}.md")), format!("# Doc {i}")).unwrap();
+    }
+    let proj = project::add_project(&pool, "limit-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    let docs = search::get_popular_documents(&pool, Some(&proj.id), 3).unwrap();
+    assert!(docs.len() <= 3, "limit must be respected");
+}

@@ -41,6 +41,7 @@ With nexus registered in `.mcp.json`, call with `mcp__nexus__nexus_*` prefix.
 | `mcp__nexus__nexus_list_projects` | List registered vaults |
 | `mcp__nexus__nexus_list_documents` | List documents (optional tag filter) |
 | `mcp__nexus__nexus_index_project` | Trigger indexing |
+| `mcp__nexus__nexus_get_ranking` | Popular docs by view_count + backlink_count |
 | `mcp__nexus__nexus_help` | Tool help |
 
 ## Tagging Standards
@@ -97,6 +98,17 @@ With nexus registered in `.mcp.json`, call with `mcp__nexus__nexus_*` prefix.
 
 You are called when the main agent's direct search failed or document management is needed.
 Start from the appropriate Phase based on the context provided.
+
+### Phase R: Ranking Query (인기/랭킹 질문)
+
+질문 패턴: "많이 본 문서", "인기 문서", "인기있는 문서", "가장 인기있는", "자주 참조되는", "핫한 문서", "top N", "랭킹", "popular"
+
+1. `nexus_get_ranking(limit: N)` — 전체 랭킹
+2. 프로젝트 지정 시: `nexus_get_ranking(project: "이름", limit: N)` — 프로젝트별 랭킹
+3. 결과 요약: 순위, 제목, 프로젝트, 조회수, 백링크 수, 점수 표시
+4. 사용자가 특정 문서를 클릭하면 `nexus_get_section` 또는 `nexus_get_document`로 내용 제공
+
+> 점수 = view_count × 0.6 + backlink_count × 0.4. 점수가 모두 0이면 최신 수정 순 정렬.
 
 ### Phase A: Deep Search (after main agent search failure)
 
