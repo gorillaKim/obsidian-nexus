@@ -55,7 +55,7 @@ function App() {
     try {
       const [allDocs, tops, attention] = await Promise.all([
         invoke<PopularDoc[]>("get_popular_documents", { limit: 10 }),
-        invoke<TopProject[]>("get_top_projects", { limit: 2 }),
+        invoke<TopProject[]>("get_top_projects", { limit: 3 }),
         invoke<AttentionDoc[]>("get_attention_documents", { limit: 8 }),
       ]);
       setPopularAll(allDocs);
@@ -84,6 +84,16 @@ function App() {
     setTab(newTab);
     if (newTab !== "search") docViewer.closeDoc();
     if (newTab === "dashboard") loadDashboard();
+  };
+
+  const handleSelectExtraProject = async (projectId: string) => {
+    if (popularByProject.has(projectId)) return;
+    try {
+      const docs = await invoke<PopularDoc[]>("get_popular_documents", { projectId, limit: 10 });
+      setPopularByProject((prev) => new Map(prev).set(projectId, docs));
+    } catch (e) {
+      console.error("failed to load project ranking", e);
+    }
   };
 
   // 최초 마운트 시 대시보드 탭이 기본이면 로드
@@ -131,6 +141,7 @@ function App() {
                   docViewer.viewDocument(projectId, filePath);
                   setTab("search");
                 }}
+                onSelectExtraProject={handleSelectExtraProject}
               />
             )}
 

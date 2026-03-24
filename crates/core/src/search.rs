@@ -899,9 +899,21 @@ pub fn record_view_by_path(pool: &DbPool, project_id: &str, file_path: &str) {
             params![project_id, file_path],
             |row| row.get(0),
         );
-        if let Ok(id) = doc_id {
-            if let Err(e) = record_view(pool, &id) {
-                tracing::warn!("Failed to record view for document {}: {}", id, e);
+        match doc_id {
+            Ok(id) => {
+                if let Err(e) = record_view(pool, &id) {
+                    tracing::warn!("record_view_by_path: failed to record view for {}: {}", id, e);
+                }
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                tracing::warn!(
+                    "record_view_by_path: document not found (project_id={}, file_path={})",
+                    project_id,
+                    file_path
+                );
+            }
+            Err(e) => {
+                tracing::warn!("record_view_by_path: db error (project_id={}, file_path={}): {}", project_id, file_path, e);
             }
         }
     }

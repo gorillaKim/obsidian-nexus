@@ -16,6 +16,7 @@ interface DashboardViewProps {
   loading: boolean;
   onOpenFile: (projectId: string, filePath: string) => void;
   onViewDocument: (projectId: string, filePath: string) => void;
+  onSelectExtraProject: (projectId: string) => void;
 }
 
 const RANK_COLORS = ["text-yellow-500", "text-gray-400", "text-orange-400"];
@@ -193,6 +194,7 @@ export function DashboardView({
   loading,
   onOpenFile,
   onViewDocument,
+  onSelectExtraProject,
 }: DashboardViewProps) {
   // 탭: "all" | project_id
   const [activeTab, setActiveTab] = useState<string>("all");
@@ -271,6 +273,7 @@ export function DashboardView({
                       onClick={() => {
                         setActiveTab(p.id);
                         setDropdownOpen(false);
+                        onSelectExtraProject(p.id);
                       }}
                       className="w-full text-left px-3 py-2 text-xs text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] transition-colors"
                     >
