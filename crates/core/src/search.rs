@@ -1033,6 +1033,137 @@ pub fn get_top_projects(pool: &DbPool, limit: usize) -> Result<Vec<TopProject>> 
     Ok(result)
 }
 
+// ─── 관심 필요 문서 ─────────────────────────────────────────────────────────────
+
+/// 관심 필요 문서 판별 기준 — 조정 시 여기만 수정
+const ATTENTION_NEVER_VIEWED_GRACE_DAYS: i64 = 7; // 생성 후 이 기간은 미열람 제외
+const ATTENTION_ORPHAN_GRACE_DAYS: i64 = 30; // 생성 후 이 기간은 고아 제외
+const ATTENTION_ORPHAN_MAX_VIEWS: i64 = 3; // 이 조회수 미만 = 고아 후보
+const ATTENTION_STALE_DAYS: i64 = 30; // 마지막 수정 후 이 기간 경과 = 오래됨
+const ATTENTION_STALE_MAX_VIEWS: i64 = 5; // 이 조회수 미만 = 오래됨 후보
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttentionDoc {
+    pub id: String,
+    pub file_path: String,
+    pub title: String,
+    pub project_id: String,
+    pub project_name: String,
+    pub view_count: i64,
+    pub backlink_count: i64,
+    pub last_modified: Option<String>,
+    pub created_at: Option<String>,
+    pub reason: String, // "never_viewed" | "orphan" | "stale"
+}
+
+/// 관심이 필요한 문서 목록 조회.
+/// reason 우선순위: never_viewed > orphan > stale
+pub fn get_attention_documents(
+    pool: &DbPool,
+    project_id: Option<&str>,
+    limit: usize,
+) -> Result<Vec<AttentionDoc>> {
+    let conn = pool.get()?;
+    let limit_i = limit as i64;
+
+    let project_filter = if project_id.is_some() {
+        "AND d.project_id = ?1"
+    } else {
+        ""
+    };
+
+    let sql = format!(
+        "WITH counts AS (
+            SELECT d.id,
+                   d.file_path,
+                   COALESCE(d.title, d.file_path) AS title,
+                   d.project_id,
+                   p.name AS project_name,
+                   d.last_modified,
+                   d.created_at,
+                   COALESCE(vc.view_count, 0) AS view_count,
+                   COALESCE(bl.backlink_count, 0) AS backlink_count
+            FROM documents d
+            JOIN projects p ON d.project_id = p.id
+            LEFT JOIN (
+                SELECT document_id, COUNT(*) AS view_count
+                FROM document_views
+                GROUP BY document_id
+            ) vc ON vc.document_id = d.id
+            LEFT JOIN (
+                SELECT target_doc_id, COUNT(*) AS backlink_count
+                FROM wiki_links
+                WHERE target_doc_id IS NOT NULL
+                GROUP BY target_doc_id
+            ) bl ON bl.target_doc_id = d.id
+            WHERE d.indexing_status = 'done'
+            {project_filter}
+        ),
+        labeled AS (
+            SELECT *,
+                   CASE
+                       WHEN view_count = 0
+                            AND (julianday('now') - julianday(created_at)) > {never_viewed_grace}
+                           THEN 'never_viewed'
+                       WHEN backlink_count = 0
+                            AND view_count < {orphan_max_views}
+                            AND (julianday('now') - julianday(created_at)) > {orphan_grace}
+                           THEN 'orphan'
+                       WHEN (julianday('now') - julianday(last_modified)) > {stale_days}
+                            AND view_count < {stale_max_views}
+                           THEN 'stale'
+                       ELSE NULL
+                   END AS reason
+            FROM counts
+        )
+        SELECT id, file_path, title, project_id, project_name,
+               view_count, backlink_count, last_modified, created_at, reason
+        FROM labeled
+        WHERE reason IS NOT NULL
+        ORDER BY
+            CASE reason
+                WHEN 'never_viewed' THEN 1
+                WHEN 'orphan' THEN 2
+                WHEN 'stale' THEN 3
+            END,
+            created_at DESC
+        LIMIT {limit_placeholder}",
+        project_filter = project_filter,
+        never_viewed_grace = ATTENTION_NEVER_VIEWED_GRACE_DAYS,
+        orphan_grace = ATTENTION_ORPHAN_GRACE_DAYS,
+        orphan_max_views = ATTENTION_ORPHAN_MAX_VIEWS,
+        stale_days = ATTENTION_STALE_DAYS,
+        stale_max_views = ATTENTION_STALE_MAX_VIEWS,
+        limit_placeholder = if project_id.is_some() { "?2" } else { "?1" },
+    );
+
+    let map_row = |row: &rusqlite::Row| -> rusqlite::Result<AttentionDoc> {
+        Ok(AttentionDoc {
+            id: row.get(0)?,
+            file_path: row.get(1)?,
+            title: row.get(2)?,
+            project_id: row.get(3)?,
+            project_name: row.get(4)?,
+            view_count: row.get(5)?,
+            backlink_count: row.get(6)?,
+            last_modified: row.get(7)?,
+            created_at: row.get(8)?,
+            reason: row.get(9)?,
+        })
+    };
+
+    let mut stmt = conn.prepare(&sql)?;
+    let docs: Vec<AttentionDoc> = if let Some(pid) = project_id {
+        stmt.query_map(params![pid, limit_i], map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    } else {
+        stmt.query_map(params![limit_i], map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    };
+
+    Ok(docs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

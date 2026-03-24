@@ -12,7 +12,7 @@ import { useProjects } from "./hooks/useProjects";
 import { useSearch } from "./hooks/useSearch";
 import { useDocViewer } from "./hooks/useDocViewer";
 import { useProjectTree } from "./hooks/useProjectTree";
-import type { Tab, PopularDoc, TopProject } from "./types";
+import type { Tab, PopularDoc, TopProject, AttentionDoc } from "./types";
 
 const MIN_CHAT_WIDTH = 280;
 const MAX_CHAT_WIDTH = 640;
@@ -48,16 +48,19 @@ function App() {
   const [popularAll, setPopularAll] = useState<PopularDoc[]>([]);
   const [topProjects, setTopProjects] = useState<TopProject[]>([]);
   const [popularByProject, setPopularByProject] = useState<Map<string, PopularDoc[]>>(new Map());
+  const [attentionDocs, setAttentionDocs] = useState<AttentionDoc[]>([]);
 
   const loadDashboard = useCallback(async () => {
     setDashLoading(true);
     try {
-      const [allDocs, tops] = await Promise.all([
+      const [allDocs, tops, attention] = await Promise.all([
         invoke<PopularDoc[]>("get_popular_documents", { limit: 10 }),
         invoke<TopProject[]>("get_top_projects", { limit: 2 }),
+        invoke<AttentionDoc[]>("get_attention_documents", { limit: 8 }),
       ]);
       setPopularAll(allDocs);
       setTopProjects(tops);
+      setAttentionDocs(attention);
 
       // 상위 2개 프로젝트별 랭킹 병렬 로드
       if (tops.length > 0) {
@@ -121,6 +124,7 @@ function App() {
                 topProjects={topProjects}
                 popularByProject={popularByProject}
                 allProjects={projectsHook.projects.map((p) => ({ id: p.id, name: p.name }))}
+                attentionDocs={attentionDocs}
                 loading={dashLoading}
                 onOpenFile={(projectId, filePath) => invoke("open_file", { projectId, filePath })}
                 onViewDocument={(projectId, filePath) => {

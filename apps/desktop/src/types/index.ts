@@ -54,6 +54,21 @@ export interface TopProject {
   activity: number;
 }
 
+export type AttentionReason = "never_viewed" | "orphan" | "stale";
+
+export interface AttentionDoc {
+  id: string;
+  file_path: string;
+  title: string;
+  project_id: string;
+  project_name: string;
+  view_count: number;
+  backlink_count: number;
+  last_modified: string | null;
+  created_at: string | null;
+  reason: AttentionReason;
+}
+
 export interface McpStatus {
   name: string;
   installed: boolean;

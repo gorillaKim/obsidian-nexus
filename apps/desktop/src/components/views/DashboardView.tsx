@@ -2,7 +2,7 @@ import { useState } from "react";
 import { LayoutDashboard, Eye, Link2, ChevronDown, ExternalLink } from "lucide-react";
 import { Card } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
-import type { PopularDoc, TopProject } from "../../types";
+import type { PopularDoc, TopProject, AttentionDoc, AttentionReason } from "../../types";
 
 interface DashboardViewProps {
   totalProjects: number;
@@ -12,6 +12,7 @@ interface DashboardViewProps {
   topProjects: TopProject[];
   popularByProject: Map<string, PopularDoc[]>;
   allProjects: { id: string; name: string }[];
+  attentionDocs: AttentionDoc[];
   loading: boolean;
   onOpenFile: (projectId: string, filePath: string) => void;
   onViewDocument: (projectId: string, filePath: string) => void;
@@ -102,6 +103,84 @@ function RankingList({
   );
 }
 
+const REASON_CONFIG: Record<AttentionReason, { label: string; color: string }> = {
+  never_viewed: { label: "미열람", color: "text-blue-400 bg-blue-400/10" },
+  orphan: { label: "고아", color: "text-orange-400 bg-orange-400/10" },
+  stale: { label: "오래됨", color: "text-yellow-500 bg-yellow-500/10" },
+};
+
+function ReasonBadge({ reason }: { reason: AttentionReason }) {
+  const cfg = REASON_CONFIG[reason];
+  return (
+    <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${cfg.color}`}>
+      {cfg.label}
+    </span>
+  );
+}
+
+function AttentionList({
+  docs,
+  loading,
+  onOpenFile,
+  onViewDocument,
+}: {
+  docs: AttentionDoc[];
+  loading: boolean;
+  onOpenFile: (projectId: string, filePath: string) => void;
+  onViewDocument: (projectId: string, filePath: string) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="divide-y divide-[var(--border)]">
+        {Array.from({ length: 4 }).map((_, i) => <SkeletonRow key={i} />)}
+      </div>
+    );
+  }
+
+  if (docs.length === 0) {
+    return (
+      <div className="py-6 text-center text-xs text-[var(--text-tertiary)]">
+        관심이 필요한 문서가 없습니다. 문서가 잘 관리되고 있습니다!
+      </div>
+    );
+  }
+
+  return (
+    <div className="divide-y divide-[var(--border)]">
+      {docs.map((doc) => (
+        <div
+          key={doc.id}
+          className="flex items-center gap-3 py-2 px-3 hover:bg-[var(--bg-secondary)] transition-colors"
+        >
+          <ReasonBadge reason={doc.reason as AttentionReason} />
+          <button
+            onClick={() => onViewDocument(doc.project_id, doc.file_path)}
+            className="flex-1 text-sm text-[var(--text-primary)] truncate text-left hover:underline"
+          >
+            {doc.title}
+          </button>
+          <span className="text-xs text-[var(--text-tertiary)] truncate max-w-[100px]">{doc.project_name}</span>
+          <span className="flex items-center gap-1 text-xs text-[var(--text-tertiary)] min-w-[40px]">
+            <Eye size={11} />
+            {doc.view_count}
+          </span>
+          <span className="flex items-center gap-1 text-xs text-[var(--text-tertiary)] min-w-[40px]">
+            <Link2 size={11} />
+            {doc.backlink_count}
+          </span>
+          <button
+            onClick={() => onOpenFile(doc.project_id, doc.file_path)}
+            className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+            title="Obsidian에서 열기"
+          >
+            <ExternalLink size={12} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function DashboardView({
   totalProjects,
   totalDocs,
@@ -110,6 +189,7 @@ export function DashboardView({
   topProjects,
   popularByProject,
   allProjects,
+  attentionDocs,
   loading,
   onOpenFile,
   onViewDocument,
@@ -205,6 +285,19 @@ export function DashboardView({
 
         {/* Ranking list */}
         <RankingList docs={currentDocs} loading={loading} onOpenFile={onOpenFile} onViewDocument={onViewDocument} />
+      </Card>
+
+      {/* Attention-needed documents */}
+      <h2 className="text-xs font-medium text-[var(--text-tertiary)] uppercase tracking-wider mb-3 mt-8">
+        관심 필요 문서
+      </h2>
+      <Card>
+        <AttentionList
+          docs={attentionDocs}
+          loading={loading}
+          onOpenFile={onOpenFile}
+          onViewDocument={onViewDocument}
+        />
       </Card>
 
       {/* Empty state when no projects */}

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use nexus_core::db::sqlite::{self, DbPool};
 use nexus_core::project::Project;
-use nexus_core::search::{PopularDoc, SearchResult, TopProject};
+use nexus_core::search::{AttentionDoc, PopularDoc, SearchResult, TopProject};
 use nexus_agent::cli_detector::{self, DetectedAgent};
 use nexus_agent::cli_bridge::{SidecarManager, BridgeResponse};
 use nexus_agent::session::{SessionManager, SessionMeta};
@@ -229,6 +229,20 @@ fn get_top_projects(
 ) -> Result<Vec<TopProject>, String> {
     nexus_core::search::get_top_projects(&state.pool, limit.unwrap_or(2))
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_attention_documents(
+    state: State<AppState>,
+    project_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<AttentionDoc>, String> {
+    nexus_core::search::get_attention_documents(
+        &state.pool,
+        project_id.as_deref(),
+        limit.unwrap_or(8),
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Current platform target triple for sidecar binary suffix
@@ -1340,6 +1354,7 @@ fn main() {
             chat_close_session,
             get_popular_documents,
             get_top_projects,
+            get_attention_documents,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
