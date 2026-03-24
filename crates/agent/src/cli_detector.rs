@@ -299,7 +299,7 @@ fn try_which(name: &str) -> Option<PathBuf> {
     }
     // Return the first existing path from `which -a` that has a valid interpreter.
     // We use is_executable_script to check shebangs without spawning, preventing
-    // "bad interpreter" errors during detection.
+    // "bad interpreter" errors during detection (e.g. broken homebrew node shebang).
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .map(|l| PathBuf::from(l.trim()))

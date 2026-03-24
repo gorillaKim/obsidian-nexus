@@ -21,6 +21,19 @@ export class ClaudeAdapter {
   /** Build Claude-specific session options from the start request */
   buildOptions(req) {
     const { model, systemPrompt, mcpServers, cliPath } = req;
+
+    // GUI apps (Tauri) don't inherit the full shell PATH, so node scripts like claude
+    // (#!/usr/bin/env node via nvm/volta) can't find their interpreter → exit code 127.
+    // Prepend the claude binary's parent dir so the OS can resolve `node` via shebang.
+    if (cliPath && cliPath.includes("/")) {
+      const parentDir = cliPath.substring(0, cliPath.lastIndexOf("/"));
+      const current = process.env.PATH || "";
+      if (parentDir && !current.split(":").includes(parentDir)) {
+        process.env.PATH = `${parentDir}:${current}`;
+        log(`PATH enriched with: ${parentDir}`);
+      }
+    }
+
     return {
       model,
       systemPrompt,
