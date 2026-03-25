@@ -32,8 +32,8 @@ export function SettingsView() {
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
   const [diagnosing, setDiagnosing] = useState<string | null>(null);
   const [diagResults, setDiagResults] = useState<Record<string, CliDiagnostics>>({});
-  const [updatingMcp, setUpdatingMcp] = useState(false);
-  const [mcpUpdateResult, setMcpUpdateResult] = useState<TestResult | null>(null);
+  const [updating, setUpdating] = useState<string | null>(null);
+  const [updateResults, setUpdateResults] = useState<Record<string, TestResult>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -72,16 +72,16 @@ export function SettingsView() {
     setDiagnosing(null);
   };
 
-  const handleUpdateMcp = async () => {
-    setUpdatingMcp(true);
-    setMcpUpdateResult(null);
+  const handleUpdate = async (key: string, command: string) => {
+    setUpdating(key);
+    setUpdateResults((prev) => { const n = { ...prev }; delete n[key]; return n; });
     try {
-      const result = await invoke<TestResult>("update_mcp_server");
-      setMcpUpdateResult(result);
+      const result = await invoke<TestResult>(command);
+      setUpdateResults((prev) => ({ ...prev, [key]: result }));
     } catch (e) {
-      setMcpUpdateResult({ ok: false, message: String(e) });
+      setUpdateResults((prev) => ({ ...prev, [key]: { ok: false, message: String(e) } }));
     }
-    setUpdatingMcp(false);
+    setUpdating(null);
   };
 
   const handleTest = async (key: string, command: string, args?: Record<string, string>) => {
@@ -116,38 +116,34 @@ export function SettingsView() {
         <h3 className="font-medium text-[var(--text-primary)] mb-3">Nexus 바이너리</h3>
         <div className="space-y-2">
           {[
-            { key: "mcp", label: "nexus-mcp-server", s: status.mcp_binary, cmd: "test_mcp", cmdArgs: undefined },
-            { key: "obs", label: "obs-nexus", s: status.obs_nexus_binary, cmd: "test_cli", cmdArgs: { cli: "obs-nexus" } },
-          ].map(({ key, label, s, cmd, cmdArgs }) => (
+            { key: "mcp", label: "nexus-mcp-server", s: status.mcp_binary, testCmd: "test_mcp", testArgs: undefined, updateCmd: "update_mcp_server" },
+            { key: "obs", label: "obs-nexus", s: status.obs_nexus_binary, testCmd: "test_cli", testArgs: { cli: "obs-nexus" }, updateCmd: "update_obs_nexus" },
+          ].map(({ key, label, s, testCmd, testArgs, updateCmd }) => (
             <div key={key}>
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0">
                   <StatusIcon ok={s.installed} />
-                  <span className="text-sm text-[var(--text-primary)]">{label}</span>
+                  <span className="text-sm text-[var(--text-primary)] whitespace-nowrap">{label}</span>
                   {s.detail && (
-                    <span className="text-xs text-[var(--text-tertiary)] truncate max-w-xs">{s.detail}</span>
+                    <span className="text-xs text-[var(--text-tertiary)] truncate">{s.detail}</span>
                   )}
-                  {!s.installed && <span className="text-xs text-red-400">앱을 재설치해주세요</span>}
+                  {!s.installed && <span className="text-xs text-red-400 whitespace-nowrap">앱을 재설치해주세요</span>}
                 </div>
-                <div className="flex items-center gap-1">
-                  {s.installed && cmd && (
-                    <Button variant="ghost" size="sm" onClick={() => handleTest(key, cmd, cmdArgs)} disabled={testing === key}>
-                      {testing === key ? <RefreshCw size={12} className="animate-spin mr-1" /> : <FlaskConical size={12} className="mr-1" />}
-                      테스트
+                {s.installed && (
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                    <Button variant="ghost" size="sm" onClick={() => handleTest(key, testCmd, testArgs)} disabled={testing === key} title="테스트">
+                      {testing === key ? <RefreshCw size={12} className="animate-spin" /> : <FlaskConical size={12} />}
                     </Button>
-                  )}
-                  {key === "mcp" && s.installed && (
-                    <Button variant="ghost" size="sm" onClick={handleUpdateMcp} disabled={updatingMcp}>
-                      {updatingMcp ? <RefreshCw size={12} className="animate-spin mr-1" /> : <RefreshCw size={12} className="mr-1" />}
-                      업데이트
+                    <Button variant="ghost" size="sm" onClick={() => handleUpdate(key, updateCmd)} disabled={updating === key} title="최신 버전으로 업데이트">
+                      <RefreshCw size={12} className={updating === key ? "animate-spin" : ""} />
                     </Button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
-              {key === "mcp" && mcpUpdateResult && (
-                <div className={`mt-1 text-xs px-2 py-1 rounded flex items-center gap-1 ${mcpUpdateResult.ok ? "text-green-500 bg-green-500/10" : "text-red-400 bg-red-400/10"}`}>
-                  {mcpUpdateResult.ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
-                  {mcpUpdateResult.message}
+              {updateResults[key] && (
+                <div className={`mt-1 text-xs px-2 py-1 rounded flex items-center gap-1 ${updateResults[key].ok ? "text-green-500 bg-green-500/10" : "text-red-400 bg-red-400/10"}`}>
+                  {updateResults[key].ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
+                  {updateResults[key].message}
                 </div>
               )}
               {testResults[key] && (

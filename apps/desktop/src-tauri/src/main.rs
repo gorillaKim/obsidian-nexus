@@ -988,15 +988,17 @@ async fn test_mcp() -> TestResult {
     }
 }
 
-#[tauri::command]
-async fn update_mcp_server() -> TestResult {
-    let sidecar_path = match find_mcp_binary() {
-        Some(p) => p,
-        None => return TestResult { ok: false, message: "MCP 바이너리 경로를 찾을 수 없습니다".to_string() },
-    };
+/// Map Rust target triple arch to release asset arch string
+fn release_arch() -> &'static str {
+    if target_triple().starts_with("aarch64") { "aarch64" } else { "x86_64" }
+}
 
-    // 1. Fetch latest release info from GitHub
-    let api_output = match std::process::Command::new("curl")
+/// Download the nexus-cli tarball from GitHub and extract a specific binary.
+/// `binary_name`: "nexus-mcp-server" or "obs-nexus"
+/// `dest_path`: full path to write the binary
+async fn download_nexus_binary(binary_name: &str, dest_path: &str) -> TestResult {
+    // 1. Fetch latest release info
+    let api_out = match std::process::Command::new("curl")
         .args(["-s", "-H", "Accept: application/vnd.github+json",
                "https://api.github.com/repos/gorillaKim/obsidian-nexus/releases/latest"])
         .output()
@@ -1005,17 +1007,19 @@ async fn update_mcp_server() -> TestResult {
         Err(e) => return TestResult { ok: false, message: format!("GitHub API 요청 실패: {}", e) },
     };
 
-    let json: serde_json::Value = match serde_json::from_slice(&api_output.stdout) {
+    let json: serde_json::Value = match serde_json::from_slice(&api_out.stdout) {
         Ok(j) => j,
         Err(e) => return TestResult { ok: false, message: format!("응답 파싱 실패: {}", e) },
     };
 
-    // 2. Find asset URL for current platform
-    let triple = target_triple();
-    let asset_prefix = format!("nexus-mcp-server-{}", triple);
+    let version = json["tag_name"].as_str().unwrap_or("unknown").to_string();
+
+    // 2. Find tarball asset URL: nexus-cli-darwin-{arch}.tar.gz
+    let arch = release_arch();
+    let asset_name = format!("nexus-cli-darwin-{}.tar.gz", arch);
     let assets = json["assets"].as_array().cloned().unwrap_or_default();
     let download_url = assets.iter()
-        .find(|a| a["name"].as_str().unwrap_or("").starts_with(&asset_prefix))
+        .find(|a| a["name"].as_str().unwrap_or("") == asset_name)
         .and_then(|a| a["browser_download_url"].as_str())
         .map(|s| s.to_string());
 
@@ -1023,16 +1027,19 @@ async fn update_mcp_server() -> TestResult {
         Some(u) => u,
         None => return TestResult {
             ok: false,
-            message: format!("릴리즈에서 {} 바이너리를 찾을 수 없습니다", asset_prefix),
+            message: format!("릴리즈에서 {} 를 찾을 수 없습니다", asset_name),
         },
     };
 
-    let version = json["tag_name"].as_str().unwrap_or("unknown").to_string();
+    // 3. Download tarball to temp dir
+    let tmp_dir = std::env::temp_dir().join("nexus-update");
+    let _ = std::fs::create_dir_all(&tmp_dir);
+    let tarball_path = tmp_dir.join("nexus-cli.tar.gz");
 
-    // 3. Download to temp path
-    let tmp_path = format!("{}.tmp", sidecar_path);
     let dl = std::process::Command::new("curl")
-        .args(["-L", "--silent", "--fail", "-o", &tmp_path, &download_url])
+        .args(["-L", "--silent", "--fail", "-o",
+               tarball_path.to_str().unwrap_or("/tmp/nexus-cli.tar.gz"),
+               &download_url])
         .status();
 
     match dl {
@@ -1041,24 +1048,64 @@ async fn update_mcp_server() -> TestResult {
         Err(e) => return TestResult { ok: false, message: format!("다운로드 오류: {}", e) },
     }
 
-    // 4. Replace existing binary
-    if let Err(e) = std::fs::rename(&tmp_path, &sidecar_path) {
-        let _ = std::fs::remove_file(&tmp_path);
-        return TestResult { ok: false, message: format!("바이너리 교체 실패: {}", e) };
+    // 4. Extract specific binary from tarball
+    let extract_out = std::process::Command::new("tar")
+        .args(["-xzf", tarball_path.to_str().unwrap_or(""),
+               "-C", tmp_dir.to_str().unwrap_or("/tmp"),
+               binary_name])
+        .output();
+
+    match extract_out {
+        Ok(o) if o.status.success() => {}
+        Ok(o) => return TestResult {
+            ok: false,
+            message: format!("압축 해제 실패: {}", String::from_utf8_lossy(&o.stderr)),
+        },
+        Err(e) => return TestResult { ok: false, message: format!("tar 실행 오류: {}", e) },
     }
 
-    // 5. chmod +x
+    // 5. Replace destination binary
+    let extracted = tmp_dir.join(binary_name);
+    if let Err(e) = std::fs::rename(&extracted, dest_path) {
+        // rename may fail across devices; fall back to copy+delete
+        if let Err(e2) = std::fs::copy(&extracted, dest_path) {
+            let _ = std::fs::remove_file(&extracted);
+            return TestResult { ok: false, message: format!("바이너리 교체 실패: {} / {}", e, e2) };
+        }
+        let _ = std::fs::remove_file(&extracted);
+    }
+
+    // 6. chmod +x
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = std::fs::metadata(&sidecar_path) {
+        if let Ok(meta) = std::fs::metadata(dest_path) {
             let mut perms = meta.permissions();
             perms.set_mode(0o755);
-            let _ = std::fs::set_permissions(&sidecar_path, perms);
+            let _ = std::fs::set_permissions(dest_path, perms);
         }
     }
 
-    TestResult { ok: true, message: format!("MCP 서버 {} 업데이트 완료. Claude Code를 재시작하세요.", version) }
+    let _ = std::fs::remove_file(&tarball_path);
+    TestResult { ok: true, message: format!("{} {} 업데이트 완료. Claude Code를 재시작하세요.", binary_name, version) }
+}
+
+#[tauri::command]
+async fn update_mcp_server() -> TestResult {
+    let sidecar_path = match find_mcp_binary() {
+        Some(p) => p,
+        None => return TestResult { ok: false, message: "MCP 바이너리 경로를 찾을 수 없습니다".to_string() },
+    };
+    download_nexus_binary("nexus-mcp-server", &sidecar_path).await
+}
+
+#[tauri::command]
+async fn update_obs_nexus() -> TestResult {
+    let sidecar_path = match find_cli_binary() {
+        Some(p) => p,
+        None => return TestResult { ok: false, message: "obs-nexus 바이너리 경로를 찾을 수 없습니다".to_string() },
+    };
+    download_nexus_binary("obs-nexus", &sidecar_path).await
 }
 
 #[tauri::command]
@@ -1415,6 +1462,7 @@ fn main() {
             open_url,
             test_mcp,
             update_mcp_server,
+            update_obs_nexus,
             test_cli,
             diagnose_cli,
             chat_new_session,
