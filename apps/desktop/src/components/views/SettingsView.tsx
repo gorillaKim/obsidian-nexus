@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, CheckCircle, XCircle, AlertCircle, ExternalLink, FlaskConical, HelpCircle } from "lucide-react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { RefreshCw, CheckCircle, XCircle, AlertCircle, ExternalLink, FlaskConical, HelpCircle, FolderOpen } from "lucide-react";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { UpdateChecker } from "../UpdateChecker";
@@ -8,6 +9,12 @@ import type { SystemStatus, CliDiagnostics } from "../../types";
 
 interface TestResult {
   ok: boolean;
+  message: string;
+}
+
+interface OnboardStep {
+  name: string;
+  status: "created" | "skipped" | "error";
   message: string;
 }
 
@@ -34,6 +41,9 @@ export function SettingsView() {
   const [diagResults, setDiagResults] = useState<Record<string, CliDiagnostics>>({});
   const [updating, setUpdating] = useState<string | null>(null);
   const [updateResults, setUpdateResults] = useState<Record<string, TestResult>>({});
+  const [onboardPath, setOnboardPath] = useState("");
+  const [onboarding, setOnboarding] = useState(false);
+  const [onboardResults, setOnboardResults] = useState<OnboardStep[] | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,6 +80,24 @@ export function SettingsView() {
       console.error("diagnose_cli failed", e);
     }
     setDiagnosing(null);
+  };
+
+  const handlePickFolder = async () => {
+    const selected = await openDialog({ directory: true, multiple: false, title: "온보딩할 프로젝트 폴더 선택" });
+    if (typeof selected === "string") setOnboardPath(selected);
+  };
+
+  const handleOnboard = async () => {
+    if (!onboardPath.trim()) return;
+    setOnboarding(true);
+    setOnboardResults(null);
+    try {
+      const steps = await invoke<OnboardStep[]>("run_onboard", { projectPath: onboardPath.trim() });
+      setOnboardResults(steps);
+    } catch (e) {
+      setOnboardResults([{ name: "error", status: "error", message: String(e) }]);
+    }
+    setOnboarding(false);
   };
 
   const handleUpdate = async (key: string, command: string) => {
@@ -321,6 +349,53 @@ export function SettingsView() {
             </Button>
           )}
         </div>
+      </Card>
+
+      {/* Claude CLI 온보딩 */}
+      <Card>
+        <h3 className="font-medium text-[var(--text-primary)] mb-1">Claude CLI 온보딩</h3>
+        <p className="text-xs text-[var(--text-tertiary)] mb-3">
+          프로젝트에 Nexus MCP 서버, 권한 설정, 검색 가이드를 한 번에 설정합니다.
+        </p>
+        <div className="flex gap-2 mb-3">
+          <input
+            type="text"
+            value={onboardPath}
+            onChange={(e) => setOnboardPath(e.target.value)}
+            placeholder="프로젝트 경로 (예: /Users/me/my-project)"
+            className="flex-1 text-sm px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)]"
+          />
+          <Button variant="ghost" size="sm" onClick={handlePickFolder} title="폴더 선택">
+            <FolderOpen size={14} />
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleOnboard}
+            disabled={onboarding || !onboardPath.trim()}
+          >
+            {onboarding ? <RefreshCw size={12} className="mr-1 animate-spin" /> : null}
+            온보딩 시작
+          </Button>
+        </div>
+        {onboardResults && (
+          <div className="space-y-1">
+            {onboardResults.map((step, i) => (
+              <div key={i} className="flex items-center gap-2 text-sm p-2 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)]">
+                {step.status === "created" && <CheckCircle size={14} className="text-green-500 shrink-0" />}
+                {step.status === "skipped" && <AlertCircle size={14} className="text-yellow-500 shrink-0" />}
+                {step.status === "error" && <XCircle size={14} className="text-red-400 shrink-0" />}
+                <span className="font-medium text-[var(--text-primary)]">{step.name}</span>
+                <span className="text-[var(--text-tertiary)]">{step.message}</span>
+              </div>
+            ))}
+            {onboardResults.every(s => s.status !== "error") && (
+              <p className="text-xs text-[var(--text-tertiary)] pt-1 px-1">
+                Claude Code 세션을 재시작하면 적용됩니다.
+              </p>
+            )}
+          </div>
+        )}
       </Card>
 
       <div className="flex justify-end">

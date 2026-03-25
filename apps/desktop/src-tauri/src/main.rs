@@ -1383,6 +1383,12 @@ fn find_sidecar_script() -> std::path::PathBuf {
     candidates[0].clone()
 }
 
+#[tauri::command]
+fn run_onboard(project_path: String) -> Result<Vec<nexus_core::onboard::OnboardStep>, String> {
+    nexus_core::onboard::onboard(Some(&project_path), false)
+        .map_err(|e| e.to_string())
+}
+
 fn which_nexus_mcp() -> std::path::PathBuf {
     // Try common paths
     let home = dirs::home_dir().unwrap_or_default();
@@ -1477,6 +1483,7 @@ fn main() {
             get_popular_documents,
             get_top_projects,
             get_attention_documents,
+            run_onboard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
