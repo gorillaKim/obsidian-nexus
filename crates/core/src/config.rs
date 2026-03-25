@@ -15,6 +15,8 @@ pub struct Config {
     pub watcher: WatcherConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub llm: LlmConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +88,8 @@ fn default_hybrid_weight() -> f64 { 0.7 }
 fn default_min_vector_score() -> f64 { 0.65 }
 fn default_debounce_ms() -> u64 { 500 }
 fn default_log_level() -> String { "info".into() }
+fn default_llm_model() -> String { "mistral".into() }
+fn default_llm_timeout() -> u64 { 5 }
 
 impl Default for Config {
     fn default() -> Self {
@@ -95,6 +99,7 @@ impl Default for Config {
             search: SearchConfig::default(),
             watcher: WatcherConfig::default(),
             logging: LoggingConfig::default(),
+            llm: LlmConfig::default(),
         }
     }
 }
@@ -144,6 +149,33 @@ impl Default for LoggingConfig {
         Self {
             level: default_log_level(),
             file: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmConfig {
+    /// LLM 기반 쿼리 재작성 활성화 (기본: false, opt-in)
+    #[serde(default)]
+    pub enabled: bool,
+    /// Ollama 채팅/생성 모델 (기본: mistral)
+    #[serde(default = "default_llm_model")]
+    pub model: String,
+    /// Ollama URL 오버라이드 (빈 문자열이면 embedding.ollama_url 사용)
+    #[serde(default)]
+    pub ollama_url: String,
+    /// LLM API 요청 타임아웃 (초, 기본: 5). CPU Ollama는 10-15으로 늘릴 것.
+    #[serde(default = "default_llm_timeout")]
+    pub timeout_secs: u64,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: default_llm_model(),
+            ollama_url: String::new(),
+            timeout_secs: default_llm_timeout(),
         }
     }
 }

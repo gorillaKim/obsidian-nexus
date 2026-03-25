@@ -122,7 +122,8 @@ fn handle_tools_list(id: &Value) -> Value {
                             "enrich": { "type": "boolean", "description": "Include metadata (tags, backlink_count, view_count, last_modified) in results (default: true)", "default": true },
                             "use_popularity": { "type": "boolean", "description": "Boost results by popularity. Default: true if project specified, false otherwise" },
                             "tags": { "type": "array", "items": { "type": "string" }, "description": "Filter results by tags (optional)" },
-                            "tag_match_all": { "type": "boolean", "description": "If true, require ALL tags to match (AND). Default false (OR).", "default": false }
+                            "tag_match_all": { "type": "boolean", "description": "If true, require ALL tags to match (AND). Default false (OR).", "default": false },
+                            "rewrite_query": { "type": "boolean", "description": "LLM으로 쿼리를 재작성하여 도메인 용어 매칭 향상 (Ollama 필요, config.llm.enabled 또는 이 파라미터로 활성화)", "default": false }
                         },
                         "required": ["query"]
                     }
@@ -354,13 +355,28 @@ fn tool_search(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::resu
         Some(nexus_core::search::TagFilter::new(tag_strings, match_all))
     };
 
-    let config = nexus_core::Config::load().unwrap_or_default();
+    let mut config = nexus_core::Config::load().unwrap_or_default();
+    // rewrite_query 파라미터로 per-request LLM 재작성 활성화 가능
+    let rewrite_query_param = args.get("rewrite_query").and_then(|v| v.as_bool()).unwrap_or(false);
+    if rewrite_query_param {
+        config.llm.enabled = true;
+    }
+
+    // LLM query rewriting — keyword/vector/hybrid 모든 모드에 공통 적용
+    let effective_query: String = if config.llm.enabled {
+        nexus_core::llm::rewrite_query(&config, query)
+            .unwrap_or_else(|_| query.to_string())
+    } else {
+        query.to_string()
+    };
+    let search_query = effective_query.as_str();
+
     let mut results = match mode {
-        "keyword" => nexus_core::search::fts_search(pool, query, resolved_pid.as_deref(), limit, tag_filter.as_ref())
+        "keyword" => nexus_core::search::fts_search(pool, search_query, resolved_pid.as_deref(), limit, tag_filter.as_ref())
             .map_err(|e| e.to_string())?,
-        "vector" => nexus_core::search::vector_search(pool, query, resolved_pid.as_deref(), limit, &config, tag_filter.as_ref())
+        "vector" => nexus_core::search::vector_search(pool, search_query, resolved_pid.as_deref(), limit, &config, tag_filter.as_ref())
             .map_err(|e| e.to_string())?,
-        _ => nexus_core::search::hybrid_search(pool, query, resolved_pid.as_deref(), limit, &config, tag_filter.as_ref())
+        _ => nexus_core::search::hybrid_search(pool, search_query, resolved_pid.as_deref(), limit, &config, tag_filter.as_ref())
             .map_err(|e| e.to_string())?,
     };
 

@@ -1,6 +1,7 @@
 pub mod config;
 pub mod db;
 pub mod embedding;
+pub mod llm;
 pub mod error;
 pub mod index_engine;
 pub mod indexer;

@@ -989,6 +989,79 @@ async fn test_mcp() -> TestResult {
 }
 
 #[tauri::command]
+async fn update_mcp_server() -> TestResult {
+    let sidecar_path = match find_mcp_binary() {
+        Some(p) => p,
+        None => return TestResult { ok: false, message: "MCP 바이너리 경로를 찾을 수 없습니다".to_string() },
+    };
+
+    // 1. Fetch latest release info from GitHub
+    let api_output = match std::process::Command::new("curl")
+        .args(["-s", "-H", "Accept: application/vnd.github+json",
+               "https://api.github.com/repos/gorillaKim/obsidian-nexus/releases/latest"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => return TestResult { ok: false, message: format!("GitHub API 요청 실패: {}", e) },
+    };
+
+    let json: serde_json::Value = match serde_json::from_slice(&api_output.stdout) {
+        Ok(j) => j,
+        Err(e) => return TestResult { ok: false, message: format!("응답 파싱 실패: {}", e) },
+    };
+
+    // 2. Find asset URL for current platform
+    let triple = target_triple();
+    let asset_prefix = format!("nexus-mcp-server-{}", triple);
+    let assets = json["assets"].as_array().cloned().unwrap_or_default();
+    let download_url = assets.iter()
+        .find(|a| a["name"].as_str().unwrap_or("").starts_with(&asset_prefix))
+        .and_then(|a| a["browser_download_url"].as_str())
+        .map(|s| s.to_string());
+
+    let download_url = match download_url {
+        Some(u) => u,
+        None => return TestResult {
+            ok: false,
+            message: format!("릴리즈에서 {} 바이너리를 찾을 수 없습니다", asset_prefix),
+        },
+    };
+
+    let version = json["tag_name"].as_str().unwrap_or("unknown").to_string();
+
+    // 3. Download to temp path
+    let tmp_path = format!("{}.tmp", sidecar_path);
+    let dl = std::process::Command::new("curl")
+        .args(["-L", "--silent", "--fail", "-o", &tmp_path, &download_url])
+        .status();
+
+    match dl {
+        Ok(s) if s.success() => {}
+        Ok(s) => return TestResult { ok: false, message: format!("다운로드 실패 (exit {})", s.code().unwrap_or(-1)) },
+        Err(e) => return TestResult { ok: false, message: format!("다운로드 오류: {}", e) },
+    }
+
+    // 4. Replace existing binary
+    if let Err(e) = std::fs::rename(&tmp_path, &sidecar_path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return TestResult { ok: false, message: format!("바이너리 교체 실패: {}", e) };
+    }
+
+    // 5. chmod +x
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&sidecar_path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = std::fs::set_permissions(&sidecar_path, perms);
+        }
+    }
+
+    TestResult { ok: true, message: format!("MCP 서버 {} 업데이트 완료. Claude Code를 재시작하세요.", version) }
+}
+
+#[tauri::command]
 async fn test_cli(cli: String) -> TestResult {
     let cli_name = cli.clone();
     // Use find_cli_path_pub which applies is_executable_script filtering,
@@ -1341,6 +1414,7 @@ fn main() {
             system_status,
             open_url,
             test_mcp,
+            update_mcp_server,
             test_cli,
             diagnose_cli,
             chat_new_session,

@@ -32,6 +32,8 @@ export function SettingsView() {
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
   const [diagnosing, setDiagnosing] = useState<string | null>(null);
   const [diagResults, setDiagResults] = useState<Record<string, CliDiagnostics>>({});
+  const [updatingMcp, setUpdatingMcp] = useState(false);
+  const [mcpUpdateResult, setMcpUpdateResult] = useState<TestResult | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,6 +70,18 @@ export function SettingsView() {
       console.error("diagnose_cli failed", e);
     }
     setDiagnosing(null);
+  };
+
+  const handleUpdateMcp = async () => {
+    setUpdatingMcp(true);
+    setMcpUpdateResult(null);
+    try {
+      const result = await invoke<TestResult>("update_mcp_server");
+      setMcpUpdateResult(result);
+    } catch (e) {
+      setMcpUpdateResult({ ok: false, message: String(e) });
+    }
+    setUpdatingMcp(false);
   };
 
   const handleTest = async (key: string, command: string, args?: Record<string, string>) => {
@@ -115,13 +129,27 @@ export function SettingsView() {
                   )}
                   {!s.installed && <span className="text-xs text-red-400">앱을 재설치해주세요</span>}
                 </div>
-                {s.installed && cmd && (
-                  <Button variant="ghost" size="sm" onClick={() => handleTest(key, cmd, cmdArgs)} disabled={testing === key}>
-                    {testing === key ? <RefreshCw size={12} className="animate-spin mr-1" /> : <FlaskConical size={12} className="mr-1" />}
-                    테스트
-                  </Button>
-                )}
+                <div className="flex items-center gap-1">
+                  {s.installed && cmd && (
+                    <Button variant="ghost" size="sm" onClick={() => handleTest(key, cmd, cmdArgs)} disabled={testing === key}>
+                      {testing === key ? <RefreshCw size={12} className="animate-spin mr-1" /> : <FlaskConical size={12} className="mr-1" />}
+                      테스트
+                    </Button>
+                  )}
+                  {key === "mcp" && s.installed && (
+                    <Button variant="ghost" size="sm" onClick={handleUpdateMcp} disabled={updatingMcp}>
+                      {updatingMcp ? <RefreshCw size={12} className="animate-spin mr-1" /> : <RefreshCw size={12} className="mr-1" />}
+                      업데이트
+                    </Button>
+                  )}
+                </div>
               </div>
+              {key === "mcp" && mcpUpdateResult && (
+                <div className={`mt-1 text-xs px-2 py-1 rounded flex items-center gap-1 ${mcpUpdateResult.ok ? "text-green-500 bg-green-500/10" : "text-red-400 bg-red-400/10"}`}>
+                  {mcpUpdateResult.ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
+                  {mcpUpdateResult.message}
+                </div>
+              )}
               {testResults[key] && (
                 <div className={`mt-1 text-xs px-2 py-1 rounded flex items-center gap-1 ${testResults[key].ok ? "text-green-500 bg-green-500/10" : "text-red-400 bg-red-400/10"}`}>
                   {testResults[key].ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
