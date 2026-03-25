@@ -139,3 +139,30 @@ aliases:
 - [[search-system]]
 - [[Dashboard 인기 문서 랭킹 기능 구현]]
 - [[module-map]]
+
+---
+
+## 세션 2 — 벤치마크 스킬 개선 & 데스크톱 MCP 업데이트 기능
+
+### search-benchmark 스킬 개선
+
+`.claude/skills/search-benchmark/SKILL.md`에 `quality` 모드 추가:
+
+- **`quality`**: 단문/장문 쿼리가 의도한 문서를 반환하는지 PASS/FAIL 검증
+- **단문 시나리오 5개 (QS-1~5)**: "RRF", "임베딩", "alias", "vector 검색", "MCP" — FTS5 토큰화 및 score 분포 검증
+- **장문 시나리오 5개 (QL-1~5)**: "overview 페이지 리뉴얼", "Ollama 연결 실패 시 동작", "처음 설정 방법" 등 — 자연어 문장이 기술 문서로 이어지는지 검증
+- 판정 기준: 단문 top-3, 장문 top-5 내 기대 문서 등장 시 PASS
+- FAIL 시 원인 분류: alias 미등록, FTS 토큰화 실패, 스코어 희석, 인덱스 없음, 벡터 비활성
+
+### 데스크톱 앱 — MCP/CLI 업데이트 버튼
+
+설정 화면 "Nexus 바이너리" 카드에 업데이트 버튼 추가:
+
+- `update_mcp_server` / `update_obs_nexus` Tauri 커맨드 구현
+- GitHub 최신 릴리즈의 `nexus-cli-darwin-{arch}.tar.gz` tarball 다운로드 후 바이너리 추출·교체
+- 버튼 UI: 아이콘 전용 (테스트=플라스크, 업데이트=새로고침) + title 툴팁
+
+### 릴리즈
+
+- v0.5.0: LLM 쿼리 재작성, alias 토큰 매칭, 검색 시나리오 테스트, MCP 업데이트 버튼 (초기 버전)
+- v0.5.1: MCP 업데이트 asset 이름 수정 (버그 fix), obs-nexus 업데이트 버튼 추가
