@@ -1,6 +1,6 @@
 # Obsidian Nexus
 
-> v0.3.12 · macOS (Apple Silicon / Intel)
+> v0.5.4 · macOS (Apple Silicon / Intel)
 
 Agent-friendly knowledge search engine for Obsidian vaults.
 
@@ -21,38 +21,62 @@ Agent-friendly knowledge search engine for Obsidian vaults.
 
 ## Installation
 
+> **어떤 방법을 선택할까?**
+> - AI 에이전트(Claude Code 등)와 연동이 목적 → **방법 1 (curl)** 또는 **방법 2 (Homebrew)**
+> - GUI로 편하게 쓰고 싶다 → **방법 3 (Desktop 앱)**
+> - 직접 빌드하고 싶다 → **방법 5 (소스)**
+
+---
+
 ### 방법 1: curl 스크립트 (권장 — CLI + MCP 서버)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gorillaKim/obsidian-nexus/master/install.sh | bash
 ```
 
+설치 완료 후 터미널을 **새로 열거나** 아래 명령어로 PATH를 즉시 적용하세요:
+
+```bash
+source ~/.zshrc    # zsh 사용 시
+source ~/.bashrc   # bash 사용 시
+```
+
+설치 확인:
+
+```bash
+obs-nexus --version
+```
+
+**설치 내용:**
 - 아키텍처 자동 감지 (Apple Silicon / Intel)
 - `obs-nexus` + `nexus-mcp-server` → `~/.local/bin` 설치
 - SHA256 체크섬 검증
-- PATH 자동 설정
+- `~/.zshrc` / `~/.bashrc`에 PATH 자동 추가
 
-> 설치 디렉토리 변경: `NEXUS_INSTALL_DIR=/usr/local/bin curl -fsSL ... | bash`
+> 설치 디렉토리를 변경하려면: `NEXUS_INSTALL_DIR=/usr/local/bin curl -fsSL ... | bash`
 
 ---
 
 ### 방법 2: Homebrew
 
-> macOS Command Line Tools 최신 버전 필요. `xcode-select --install` 으로 설치.
-
 ```bash
 brew tap gorillaKim/nexus
-brew install gorillaKim/nexus/obsidian-nexus      # CLI + MCP 서버 (Formula)
-brew install --cask gorillaKim/nexus/obsidian-nexus   # Desktop 앱 (Cask)
+brew install gorillaKim/nexus/obsidian-nexus      # CLI + MCP 서버
+```
+
+Desktop 앱도 함께 설치하려면:
+
+```bash
+brew install --cask gorillaKim/nexus/obsidian-nexus
 ```
 
 업데이트:
 ```bash
-brew upgrade obsidian-nexus           # Formula (CLI + MCP 서버)
-brew upgrade --cask obsidian-nexus    # Cask (Desktop 앱)
+brew upgrade obsidian-nexus           # CLI + MCP 서버
+brew upgrade --cask obsidian-nexus    # Desktop 앱
 ```
 
-릴리즈 태그 푸시 시 CI가 tap을 자동으로 갱신합니다.
+> **사전 요구사항:** macOS Command Line Tools 필요. 없으면 `xcode-select --install` 실행.
 
 ---
 
@@ -60,67 +84,80 @@ brew upgrade --cask obsidian-nexus    # Cask (Desktop 앱)
 
 1. [Releases 페이지](https://github.com/gorillaKim/obsidian-nexus/releases/latest)에서 `Obsidian-Nexus.dmg` 다운로드
 2. DMG 열기 → `Obsidian Nexus.app`을 `/Applications`로 드래그
-3. 앱 실행 (최초 실행 시 Gatekeeper 경고가 뜰 수 있음 — 아래 참고)
+3. 앱 실행
 
-**"앱이 손상되었습니다" 오류가 뜨면** (macOS Gatekeeper 미서명 차단):
+> Desktop 앱 안에 CLI와 MCP 서버가 내장되어 있습니다. 앱을 통해 실행하면 항상 최신 버전이 사용됩니다.
 
-1. 터미널을 열고 아래 명령어 실행:
-
-```bash
-xattr -cr /Applications/Obsidian\ Nexus.app
-```
-
-2. 다시 앱을 실행합니다.
-
-명령어가 동작하지 않는 경우 (macOS 15 Sequoia 이상):
-
-```bash
-# 시스템 설정 → 개인정보 보호 및 보안 → 보안 섹션에서 "확인 없이 열기" 버튼 클릭
-# 또는 아래 명령어로 격리 속성만 제거
-sudo xattr -d com.apple.quarantine /Applications/Obsidian\ Nexus.app
-```
-
-> 이 오류는 App Store 외부에서 다운로드한 앱에 macOS가 자동으로 격리(quarantine) 속성을 부여하기 때문입니다. `xattr -cr`은 해당 속성을 제거합니다.
-
-> Desktop 앱 안에 CLI와 MCP 서버가 내장되어 있습니다. CLI만 필요하면 방법 1로 충분합니다.
-
-#### 데스크톱 앱 최초 실행 시 자동 처리
-
-앱을 처음 실행하면 다음을 자동으로 수행합니다:
+**최초 실행 시 자동 처리:**
 
 | 단계 | 동작 |
 |------|------|
 | Obsidian 설치 | 미설치 시 `brew install --cask obsidian` 자동 실행 |
 | MCP 서버 등록 | Claude Desktop / Claude Code / Gemini CLI 설정에 자동 등록 |
-| CLI PATH 설정 | `~/.local/bin/nexus` 심볼릭 링크 생성 + shell rc에 PATH 추가 |
+| CLI PATH 설정 | `~/.local/bin/obs-nexus` 심볼릭 링크 생성 + shell rc에 PATH 추가 |
 
-> Ollama는 자동 설치되지 않습니다. 벡터 검색을 사용하려면 별도 설치가 필요합니다 (`obs-nexus setup` 실행 시 안내).
+> Ollama는 자동 설치되지 않습니다. 벡터 검색을 원하면 [Setup 0단계](#0-ollama-설치-벡터-검색)를 참고하세요.
+
+**"앱이 손상되었습니다" 오류 해결:**
+
+macOS가 App Store 외부 앱에 격리(quarantine) 속성을 부여해 발생합니다.
+
+```bash
+xattr -cr /Applications/Obsidian\ Nexus.app
+```
+
+위 명령이 동작하지 않으면 (macOS 15 Sequoia 이상):
+
+```bash
+sudo xattr -d com.apple.quarantine /Applications/Obsidian\ Nexus.app
+```
+
+또는 **시스템 설정 → 개인정보 보호 및 보안 → 보안** 섹션에서 "확인 없이 열기" 버튼을 클릭하세요.
 
 ---
 
 ### 방법 4: CLI 수동 설치
 
+`~/.local/bin` 디렉토리가 없으면 먼저 생성하세요:
+
 ```bash
-# Apple Silicon
-curl -fsSL https://github.com/gorillaKim/obsidian-nexus/releases/latest/download/nexus-cli-darwin-aarch64.tar.gz \
-  | tar xz -C ~/.local/bin
+mkdir -p ~/.local/bin
+```
+
+CLI와 MCP 서버를 함께 설치합니다:
+
+```bash
+# Apple Silicon (M1/M2/M3/M4)
+BASE=https://github.com/gorillaKim/obsidian-nexus/releases/latest/download
+curl -fsSL $BASE/nexus-cli-darwin-aarch64.tar.gz    | tar xz -C ~/.local/bin
+curl -fsSL $BASE/nexus-mcp-server-darwin-aarch64.tar.gz | tar xz -C ~/.local/bin
 
 # Intel Mac
-curl -fsSL https://github.com/gorillaKim/obsidian-nexus/releases/latest/download/nexus-cli-darwin-x86_64.tar.gz \
-  | tar xz -C ~/.local/bin
+BASE=https://github.com/gorillaKim/obsidian-nexus/releases/latest/download
+curl -fsSL $BASE/nexus-cli-darwin-x86_64.tar.gz    | tar xz -C ~/.local/bin
+curl -fsSL $BASE/nexus-mcp-server-darwin-x86_64.tar.gz | tar xz -C ~/.local/bin
+```
+
+PATH에 추가 (아직 없는 경우):
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 ```
 
 ---
 
 ### 방법 5: 소스에서 빌드
 
-**Prerequisites:** Rust 1.75+, Node.js 22+, pnpm
+**사전 요구사항:**
+- Rust 1.75+ (`rustup` 권장)
+- Node.js 22+, pnpm (Desktop 앱 빌드 시에만 필요)
+- Xcode Command Line Tools (`xcode-select --install`)
 
 ```bash
 git clone https://github.com/gorillaKim/obsidian-nexus.git
 cd obsidian-nexus
 
-# CLI + MCP 서버 빌드
+# CLI + MCP 서버 빌드 및 설치
 cargo build --release -p nexus-cli -p nexus-mcp-server
 cp target/release/obs-nexus ~/.local/bin/
 cp target/release/nexus-mcp-server ~/.local/bin/
@@ -133,22 +170,28 @@ cd apps/desktop && pnpm install && cargo tauri build
 
 ## Setup (설치 후 초기 설정)
 
-### 0. Ollama 설치 (벡터 검색 필수 의존성)
+설치가 완료됐으면 아래 순서대로 초기 설정을 진행하세요.
 
-벡터/하이브리드 검색을 사용하려면 Ollama를 **직접 설치**해야 합니다.
+### 0. Ollama 설치 (벡터 검색)
+
+하이브리드/벡터 검색을 사용하려면 Ollama가 필요합니다. **키워드 검색만 사용한다면 이 단계를 건너뛰세요.**
 
 ```bash
-# macOS
+# Ollama 설치
 brew install ollama
 
-# 서비스 시작
-ollama serve
+# 백그라운드 서비스로 시작
+brew services start ollama
 
-# 임베딩 모델 다운로드 (768차원, ~274MB)
+# 임베딩 모델 다운로드 (~274MB, 최초 1회)
 ollama pull nomic-embed-text
 ```
 
-> 키워드 검색만 사용한다면 Ollama 없이도 동작합니다.
+정상 설치 확인:
+
+```bash
+ollama list   # nomic-embed-text 가 목록에 보이면 완료
+```
 
 ### 1. 초기화
 
@@ -156,17 +199,21 @@ ollama pull nomic-embed-text
 obs-nexus setup
 ```
 
-- Ollama 연결 확인 및 `nomic-embed-text` 모델 설치 여부 검증
+- Ollama 연결 및 `nomic-embed-text` 모델 설치 여부 확인
 - 로컬 데이터베이스 초기화 (`~/.nexus/`)
+
+Ollama 없이 키워드 검색만 사용하는 경우에도 이 단계는 필요합니다.
 
 ### 2. Obsidian 볼트 등록
 
 ```bash
-obs-nexus project add --name my-notes --path /path/to/obsidian/vault
+obs-nexus project add --name my-notes --path ~/Documents/MyObsidianVault
 
 # 등록 확인
 obs-nexus project list
 ```
+
+`--path`는 Obsidian이 열 때 지정하는 볼트 루트 디렉토리입니다.
 
 ### 3. 문서 인덱싱
 
@@ -176,28 +223,44 @@ obs-nexus index my-notes --full   # 전체 재인덱싱
 obs-nexus index --all             # 모든 볼트 인덱싱
 ```
 
-### 4. AI 에이전트(MCP) 연동
+인덱싱이 완료되면 검색이 가능합니다:
 
 ```bash
-# 자동 설정 — .mcp.json + librarian 에이전트 파일 자동 생성
+obs-nexus search "찾고싶은 내용"
+```
+
+### 4. AI 에이전트(MCP) 연동
+
+Claude Code 등 AI 에이전트가 문서를 직접 검색하게 하려면 MCP 서버를 연동합니다.
+
+**자동 설정 (권장):**
+
+```bash
+# 프로젝트 디렉토리에서 실행 — .mcp.json 자동 생성
 obs-nexus onboard /path/to/my-project
 ```
 
-또는 수동으로 `.mcp.json` 생성:
+연동 확인:
+
+```bash
+obs-nexus status   # Ollama 연결 + 인덱스 상태 출력
+```
+
+**수동 설정:** 프로젝트 루트에 `.mcp.json` 파일 생성:
 
 ```json
 {
   "mcpServers": {
     "nexus": {
       "type": "stdio",
-      "command": "nexus-mcp-server",
+      "command": "/Users/yourname/.local/bin/nexus-mcp-server",
       "args": []
     }
   }
 }
 ```
 
-> `command` 값은 `which nexus-mcp-server` 출력으로 대체하세요.
+> `command` 경로는 `which nexus-mcp-server` 출력값으로 대체하세요.
 
 ---
 
@@ -244,6 +307,190 @@ obs-nexus update --force      # 캐시 무시하고 강제 확인
 | `nexus_index_project` | 인덱싱 트리거 |
 | `nexus_status` | 시스템 상태 확인 |
 | `nexus_onboard` | 프로젝트에 librarian 스킬 자동 설정 |
+
+---
+
+## Q&A (자주 묻는 문제)
+
+### 설치
+
+**Q. `obs-nexus: command not found` 오류가 납니다.**
+
+`~/.local/bin`이 PATH에 없는 경우입니다.
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+```
+
+터미널을 새로 열어도 해결됩니다.
+
+---
+
+**Q. curl 설치 스크립트가 "Permission denied"로 실패합니다.**
+
+`~/.local/bin` 디렉토리가 없거나 쓰기 권한이 없는 경우입니다.
+
+```bash
+mkdir -p ~/.local/bin
+# 이후 설치 스크립트 재실행
+```
+
+특정 디렉토리에 설치하려면:
+
+```bash
+NEXUS_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/gorillaKim/obsidian-nexus/master/install.sh | bash
+```
+
+---
+
+**Q. Desktop 앱을 열면 "앱이 손상되었습니다"라고 합니다.**
+
+macOS Gatekeeper가 App Store 외부 앱을 차단하는 것입니다.
+
+```bash
+xattr -cr /Applications/Obsidian\ Nexus.app
+```
+
+macOS 15 Sequoia 이상에서 위 명령이 안 되면:
+
+```bash
+sudo xattr -d com.apple.quarantine /Applications/Obsidian\ Nexus.app
+```
+
+---
+
+### 초기 설정
+
+**Q. `obs-nexus setup` 실행 시 "Ollama connection failed" 오류가 납니다.**
+
+Ollama가 실행 중이지 않은 경우입니다.
+
+```bash
+# 서비스로 실행 (재부팅 후에도 자동 시작)
+brew services start ollama
+
+# 또는 포그라운드로 실행 (터미널 별도 유지 필요)
+ollama serve
+```
+
+실행 후 `obs-nexus setup`을 재시도하세요.
+
+---
+
+**Q. `obs-nexus setup` 실행 시 "model 'nomic-embed-text' not found" 오류가 납니다.**
+
+임베딩 모델이 아직 다운로드되지 않은 상태입니다.
+
+```bash
+ollama pull nomic-embed-text   # ~274MB 다운로드
+```
+
+완료 후 `obs-nexus setup` 재실행.
+
+---
+
+**Q. 벡터 검색 없이 키워드 검색만 사용하고 싶습니다.**
+
+Ollama 없이도 동작합니다. `obs-nexus setup` 시 Ollama 연결 오류가 나도 계속 진행하면 FTS5 키워드 검색 전용으로 사용할 수 있습니다.
+
+검색 시 모드를 명시하세요:
+
+```bash
+obs-nexus search "query" --mode keyword
+```
+
+---
+
+### 인덱싱
+
+**Q. 인덱싱이 완료됐는데 검색 결과가 나오지 않습니다.**
+
+1. 프로젝트 이름이 올바른지 확인:
+
+```bash
+obs-nexus project list
+```
+
+2. 인덱스된 문서 수 확인:
+
+```bash
+obs-nexus status
+```
+
+3. 문서 수가 0이면 전체 재인덱싱:
+
+```bash
+obs-nexus index my-notes --full
+```
+
+---
+
+**Q. 볼트 경로를 잘못 등록했습니다.**
+
+프로젝트를 제거하고 올바른 경로로 다시 추가하세요:
+
+```bash
+obs-nexus project remove my-notes
+obs-nexus project add --name my-notes --path /correct/path/to/vault
+obs-nexus index my-notes --full
+```
+
+---
+
+### MCP 연동
+
+**Q. Claude Code에서 `nexus_search` 도구가 보이지 않습니다.**
+
+1. `.mcp.json`이 프로젝트 루트에 있는지 확인하세요.
+2. `nexus-mcp-server` 경로가 올바른지 확인:
+
+```bash
+which nexus-mcp-server   # 경로 출력 확인
+```
+
+출력된 절대 경로를 `.mcp.json`의 `command`에 넣으세요.
+
+3. Claude Code를 재시작하세요.
+
+---
+
+**Q. MCP 서버가 실행되다가 바로 종료됩니다.**
+
+`obs-nexus status`로 시스템 상태를 확인하세요:
+
+```bash
+obs-nexus status
+```
+
+DB가 초기화되지 않은 경우 `obs-nexus setup`을 먼저 실행해야 합니다.
+
+---
+
+**Q. `obs-nexus onboard`를 실행했는데 `.mcp.json`이 생성되지 않습니다.**
+
+`onboard` 명령에 프로젝트 디렉토리 경로를 인자로 전달해야 합니다:
+
+```bash
+obs-nexus onboard /path/to/your/project   # 절대 경로 사용
+```
+
+---
+
+### 업데이트
+
+**Q. 새 버전이 나왔는데 자동 업데이트가 안 됩니다.**
+
+CLI는 자동 업데이트되지 않습니다. 수동으로 업데이트하세요:
+
+```bash
+obs-nexus update
+```
+
+Homebrew로 설치했다면:
+
+```bash
+brew upgrade obsidian-nexus
+```
 
 ---
 
