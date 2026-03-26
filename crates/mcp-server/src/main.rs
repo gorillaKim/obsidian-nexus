@@ -485,5 +485,5 @@ fn tool_onboard(args: &Value) -> std::result::Result<String, String> {
     let force = args.get("force").and_then(|f| f.as_bool()).unwrap_or(false);
     let project_path = args.get("project_path").and_then(|p| p.as_str());
     let result = nexus_core::onboard::onboard(project_path, force).map_err(|e| e.to_string())?;
-    Ok(result.report())
+    serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
 }

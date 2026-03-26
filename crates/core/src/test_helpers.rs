@@ -38,6 +38,8 @@ pub mod helpers {
         conn.execute_batch(include_str!("../migrations/V4__links.sql")).unwrap();
         // V5: search enhancements (document_views, created_at)
         conn.execute_batch(include_str!("../migrations/V5__search_enhancements.sql")).unwrap();
+        // V6: FTS5 aliases column
+        conn.execute_batch(include_str!("../migrations/V6__fts_aliases.sql")).unwrap();
 
         pool
     }

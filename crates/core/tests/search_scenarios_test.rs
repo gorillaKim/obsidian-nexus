@@ -39,6 +39,7 @@ fn test_pool() -> DbPool {
     .unwrap();
     conn.execute_batch(include_str!("../migrations/V4__links.sql")).unwrap();
     conn.execute_batch(include_str!("../migrations/V5__search_enhancements.sql")).unwrap();
+    conn.execute_batch(include_str!("../migrations/V6__fts_aliases.sql")).unwrap();
     pool
 }
 

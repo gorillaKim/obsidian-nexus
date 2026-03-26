@@ -114,7 +114,16 @@ pub fn run_migrations(pool: &DbPool) -> Result<()> {
         tx.commit()?;
     }
 
-    tracing::info!("Database schema is up to date (version {})", std::cmp::max(version, 1));
+    if version < 6 {
+        tracing::info!("Running migration V6: FTS5 aliases column");
+        let tx = conn.transaction()?;
+        tx.execute_batch(include_str!("../../migrations/V6__fts_aliases.sql"))?;
+        tx.execute("INSERT INTO schema_version (version) VALUES (?1)", params![6])?;
+        tx.commit()?;
+    }
+
+    const LATEST_VERSION: i32 = 6;
+    tracing::info!("Database schema is up to date (version {})", LATEST_VERSION);
     Ok(())
 }
 

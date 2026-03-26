@@ -119,8 +119,17 @@ fn index_single_file(
 
     // Generate embeddings outside transaction (network call, avoid holding lock)
     // Normalize embeddings for sqlite-vec (L2 distance ≈ cosine distance when normalized)
-    let embeddings: Vec<Option<Vec<f32>>> = parsed.chunks.iter().map(|chunk| {
-        match crate::embedding::embed_text(config, &chunk.content) {
+    // embed_text is enriched with title + aliases for the first chunk to improve vector recall.
+    // FTS-stored content is NOT modified — only the embedding input differs.
+    let embed_title = parsed.title.as_deref().unwrap_or("");
+    let embed_file_stem = std::path::Path::new(file_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .replace('-', " ");
+    let embeddings: Vec<Option<Vec<f32>>> = parsed.chunks.iter().enumerate().map(|(i, chunk)| {
+        let text = build_embed_text(embed_title, &embed_file_stem, &parsed.aliases, &chunk.content, i);
+        match crate::embedding::embed_text(config, &text) {
             Ok(mut vec) => {
                 crate::embedding::normalize(&mut vec);
                 Some(vec)
@@ -168,9 +177,16 @@ fn index_single_file(
         } else {
             chunk.content.clone()
         };
+        // Store aliases only on first chunk to avoid redundant repetition across chunks
+        let chunk_aliases: Option<String> = if i == 0 && !parsed.aliases.is_empty() {
+            let limited: Vec<&str> = parsed.aliases.iter().take(MAX_ALIAS_COUNT).map(|s| s.as_str()).collect();
+            Some(limited.join(", "))
+        } else {
+            None
+        };
         tx.execute(
-            "INSERT INTO chunks (id, document_id, chunk_index, content, heading_path, start_line, end_line)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO chunks (id, document_id, chunk_index, content, heading_path, start_line, end_line, aliases)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 chunk_id,
                 doc_id,
@@ -179,6 +195,7 @@ fn index_single_file(
                 chunk.heading_path,
                 chunk.start_line as i64,
                 chunk.end_line as i64,
+                chunk_aliases,
             ],
         )?;
 
@@ -318,6 +335,31 @@ pub struct IndexReport {
     pub unchanged: usize,
     pub skipped: usize,
     pub errors: usize,
+}
+
+/// Maximum number of aliases included in embedding text and stored per chunk.
+const MAX_ALIAS_COUNT: usize = 5;
+
+/// Build the text input for embedding a chunk.
+/// For the first chunk (index 0), prepends title, file stem, and up to MAX_ALIAS_COUNT aliases.
+/// Remaining chunks use raw content to avoid redundant prefix storage.
+pub(crate) fn build_embed_text(
+    title: &str,
+    file_stem: &str,
+    aliases: &[String],
+    content: &str,
+    chunk_index: usize,
+) -> String {
+    if chunk_index != 0 {
+        return content.to_string();
+    }
+    let alias_part = if aliases.is_empty() {
+        String::new()
+    } else {
+        let limited: Vec<&str> = aliases.iter().take(MAX_ALIAS_COUNT).map(|s| s.as_str()).collect();
+        format!("별칭: {}\n", limited.join(", "))
+    };
+    format!("제목: {} {}\n{}{}", title, file_stem, alias_part, content)
 }
 
 #[cfg(test)]
@@ -470,6 +512,40 @@ mod tests {
         assert!(stats.doc_count >= 3);
         assert!(stats.chunk_count > 0);
         assert_eq!(stats.pending_count, 0);
+    }
+
+    #[test]
+    fn test_build_embed_text_with_aliases() {
+        let aliases = vec!["별칭A".to_string(), "AliasB".to_string()];
+        let text = build_embed_text("My Title", "my-file", &aliases, "본문 내용", 0);
+        assert!(text.contains("제목: My Title my-file"), "title prefix missing");
+        assert!(text.contains("별칭: 별칭A, AliasB"), "aliases prefix missing");
+        assert!(text.contains("본문 내용"), "content missing");
+    }
+
+    #[test]
+    fn test_build_embed_text_no_aliases() {
+        let text = build_embed_text("Title", "file", &[], "content", 0);
+        assert!(text.contains("제목: Title file"));
+        assert!(!text.contains("별칭:"), "should not have alias prefix when no aliases");
+        assert!(text.contains("content"));
+    }
+
+    #[test]
+    fn test_build_embed_text_non_first_chunk() {
+        let aliases = vec!["SomeAlias".to_string()];
+        let text = build_embed_text("Title", "file", &aliases, "content", 1);
+        assert_eq!(text, "content", "non-first chunk must return raw content only");
+    }
+
+    #[test]
+    fn test_build_embed_text_alias_limit() {
+        let aliases: Vec<String> = (0..8).map(|i| format!("Alias{i}")).collect();
+        let text = build_embed_text("T", "f", &aliases, "body", 0);
+        // 최대 5개만 포함되어야 함
+        let alias_line = text.lines().find(|l| l.starts_with("별칭:")).unwrap();
+        let count = alias_line.split(',').count();
+        assert_eq!(count, 5, "alias count should be capped at 5, got {count}");
     }
 
     #[test]

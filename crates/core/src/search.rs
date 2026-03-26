@@ -180,7 +180,7 @@ pub fn fts_search(
         let mut s = String::from(
             "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
                     snippet(chunks_fts, 0, '<b>', '</b>', '...', 64) as snippet,
-                    rank
+                    bm25(chunks_fts, 1.0, 0.5, 5.0) as score
              FROM chunks_fts
              JOIN chunks c ON chunks_fts.rowid = c.rowid
              JOIN documents d ON c.document_id = d.id
@@ -194,7 +194,7 @@ pub fn fts_search(
             s.push(' ');
             s.push_str(clause);
         }
-        s.push_str(" ORDER BY rank LIMIT ?");
+        s.push_str(" ORDER BY score LIMIT ?");
         s
     };
 
@@ -216,131 +216,7 @@ pub fn fts_search(
     let results = stmt.query_map(param_refs.as_slice(), map_result)?
         .collect::<std::result::Result<Vec<_>, _>>()?;
 
-    // Always resolve aliases and merge to front, but respect tag filter
-    let alias_results = {
-        let raw = resolve_alias_results(&conn, trimmed, project_id, limit);
-        if let Some(ref ids) = tag_doc_ids {
-            raw.into_iter()
-                .filter(|r| ids.contains(&r.document_id))
-                .collect()
-        } else {
-            raw
-        }
-    };
-    let results = merge_alias_results(alias_results, results, limit);
-
     Ok(results)
-}
-
-/// Resolve aliases: find documents whose alias matches the query.
-/// Matches both the full query phrase AND individual tokens (space-split),
-/// so "overview 페이지 리뉴얼" also matches an alias of just "overview".
-/// 단일 OR 쿼리로 실행하여 N+1 SQL 호출을 방지한다.
-fn resolve_alias_results(
-    conn: &rusqlite::Connection,
-    query: &str,
-    project_id: Option<&str>,
-    limit: usize,
-) -> Vec<SearchResult> {
-    // Build a deduplicated list of patterns: full phrase + each whitespace token
-    let trimmed = query.trim();
-    let mut patterns: Vec<String> = vec![format!("%{}%", trimmed)];
-    for token in trimmed.split_whitespace() {
-        if token.chars().count() >= 2 {
-            let p = format!("%{}%", token);
-            if !patterns.contains(&p) {
-                patterns.push(p);
-            }
-        }
-    }
-
-    // OR 조건 생성: da.alias LIKE ?1 OR da.alias LIKE ?2 ...
-    let n = patterns.len();
-    let or_clause = (1..=n)
-        .map(|i| format!("da.alias LIKE ?{i}"))
-        .collect::<Vec<_>>()
-        .join(" OR ");
-
-    // 파라미터 인덱스: ?1..?N = patterns, ?{N+1} = project_id (옵션), ?{N+1 or N+2} = limit
-    let sql = if project_id.is_some() {
-        format!(
-            "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
-                    substr(c.content, 1, 200) as snippet, 0.0 as score
-             FROM document_aliases da
-             JOIN documents d ON da.document_id = d.id
-             JOIN chunks c ON c.document_id = d.id
-             JOIN projects p ON d.project_id = p.id
-             WHERE ({or_clause})
-               AND d.project_id = ?{pid_idx}
-             GROUP BY c.document_id
-             LIMIT ?{limit_idx}",
-            or_clause = or_clause,
-            pid_idx = n + 1,
-            limit_idx = n + 2,
-        )
-    } else {
-        format!(
-            "SELECT c.id, c.document_id, d.file_path, p.name, c.heading_path,
-                    substr(c.content, 1, 200) as snippet, 0.0 as score
-             FROM document_aliases da
-             JOIN documents d ON da.document_id = d.id
-             JOIN chunks c ON c.document_id = d.id
-             JOIN projects p ON d.project_id = p.id
-             WHERE ({or_clause})
-             GROUP BY c.document_id
-             LIMIT ?{limit_idx}",
-            or_clause = or_clause,
-            limit_idx = n + 1,
-        )
-    };
-
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-
-    // 파라미터 바인딩: patterns... [, project_id], limit
-    // rusqlite::types::Value (owned)를 사용하여 수명 문제 회피
-    let mut param_values: Vec<rusqlite::types::Value> = patterns
-        .iter()
-        .map(|p| rusqlite::types::Value::Text(p.clone()))
-        .collect();
-    if let Some(pid) = project_id {
-        param_values.push(rusqlite::types::Value::Text(pid.to_string()));
-    }
-    param_values.push(rusqlite::types::Value::Integer(limit as i64));
-
-    let result = match stmt.query_map(rusqlite::params_from_iter(param_values.iter()), map_result) {
-        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-        Err(_) => vec![],
-    };
-    result
-}
-
-/// Merge alias results into the front of search results, deduplicating by document_id
-fn merge_alias_results(alias_results: Vec<SearchResult>, main_results: Vec<SearchResult>, limit: usize) -> Vec<SearchResult> {
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut merged = Vec::with_capacity(limit);
-
-    // Alias matches first — score를 1.0으로 설정해 enrich 후에도 상위 유지
-    for mut r in alias_results {
-        if seen.insert(r.document_id.clone()) {
-            r.score = 1.0;
-            merged.push(r);
-        }
-    }
-
-    // Then main results
-    for r in main_results {
-        if merged.len() >= limit {
-            break;
-        }
-        if seen.insert(r.document_id.clone()) {
-            merged.push(r);
-        }
-    }
-
-    merged
 }
 
 fn map_result(row: &rusqlite::Row) -> rusqlite::Result<SearchResult> {
@@ -639,13 +515,7 @@ pub fn hybrid_search(
 
     let main_results: Vec<SearchResult> = merged.into_iter().map(|(score, mut r)| { r.score = score; r }).collect();
 
-    // Always resolve aliases and merge to front
-    // Use original query for alias matching so user intent is preserved even after rewriting
-    let conn = pool.get()?;
-    let alias_results = resolve_alias_results(&conn, query.trim(), project_id, limit);
-    let results = merge_alias_results(alias_results, main_results, limit);
-
-    Ok(results)
+    Ok(main_results)
 }
 
 /// Enrich search results with metadata (tags, backlink_count, view_count, last_modified)

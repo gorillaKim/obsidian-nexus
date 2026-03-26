@@ -35,6 +35,7 @@ fn test_pool() -> DbPool {
     ).unwrap();
     conn.execute_batch(include_str!("../migrations/V4__links.sql")).unwrap();
     conn.execute_batch(include_str!("../migrations/V5__search_enhancements.sql")).unwrap();
+    conn.execute_batch(include_str!("../migrations/V6__fts_aliases.sql")).unwrap();
     pool
 }
 
@@ -556,4 +557,86 @@ fn test_get_popular_documents_limit() {
 
     let docs = search::get_popular_documents(&pool, Some(&proj.id), 3).unwrap();
     assert!(docs.len() <= 3, "limit must be respected");
+}
+
+#[test]
+fn test_alias_fts_search_via_bm25() {
+    let pool = test_pool();
+    let vault = TempDir::new().unwrap();
+
+    // 문서: 본문에 "성과"라는 단어 없음, alias로만 등록
+    fs::write(
+        vault.path().join("performance-report.md"),
+        r#"---
+title: Performance Report
+aliases:
+  - 성과 리포트
+  - 성과보고서
+tags:
+  - report
+---
+
+# Performance Report
+
+This document contains quarterly performance metrics and KPIs.
+"#,
+    ).unwrap();
+
+    // 관련 없는 문서
+    fs::write(
+        vault.path().join("other.md"),
+        "# Other\n\nUnrelated content about recipes.\n",
+    ).unwrap();
+
+    let proj = project::add_project(&pool, "alias-fts-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    // alias 키워드로 FTS 검색 → performance-report.md가 상위에 와야 함
+    let results = search::fts_search(&pool, "성과 리포트", Some(&proj.id), 10, None)
+        .expect("FTS alias search failed");
+    assert!(!results.is_empty(), "alias keyword search should return results");
+    assert!(
+        results[0].file_path.contains("performance-report.md"),
+        "alias-matched document should rank first, got: {}",
+        results[0].file_path
+    );
+}
+
+#[test]
+fn test_alias_fts_multi_match_scores_higher() {
+    let pool = test_pool();
+    let vault = TempDir::new().unwrap();
+
+    // doc-a: alias 2개 매칭
+    fs::write(vault.path().join("doc-a.md"), r#"---
+title: Doc A
+aliases:
+  - 검색엔진
+  - 검색 시스템
+---
+# Doc A
+Content about indexing.
+"#).unwrap();
+
+    // doc-b: alias 1개 매칭
+    fs::write(vault.path().join("doc-b.md"), r#"---
+title: Doc B
+aliases:
+  - 검색엔진
+---
+# Doc B
+Content about something else.
+"#).unwrap();
+
+    let proj = project::add_project(&pool, "alias-score-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    let results = search::fts_search(&pool, "검색엔진 검색 시스템", Some(&proj.id), 10, None)
+        .expect("FTS search failed");
+    assert!(results.len() >= 2, "should return both docs");
+    assert!(
+        results[0].file_path.contains("doc-a.md"),
+        "doc with more alias matches should rank higher, got: {}",
+        results[0].file_path
+    );
 }
