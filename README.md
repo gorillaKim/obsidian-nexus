@@ -90,13 +90,17 @@ brew upgrade --cask obsidian-nexus    # Desktop 앱
 
 **최초 실행 시 자동 처리:**
 
-| 단계 | 동작 |
-|------|------|
-| Obsidian 설치 | 미설치 시 `brew install --cask obsidian` 자동 실행 |
-| MCP 서버 등록 | Claude Desktop / Claude Code / Gemini CLI 설정에 자동 등록 |
-| CLI PATH 설정 | `~/.local/bin/obs-nexus` 심볼릭 링크 생성 + shell rc에 PATH 추가 |
+| 항목 | 동작 | 비고 |
+|------|------|------|
+| Obsidian 설치 | 미설치 시 `brew install --cask obsidian` 자동 실행 | |
+| CLI 심볼릭 링크 | `~/.local/bin/obs-nexus`, `~/.local/bin/nexus-mcp-server` 생성 | 앱 내장 바이너리를 가리킴 |
+| PATH 추가 | `~/.zshrc`에 `export PATH="$HOME/.local/bin:$PATH"` 추가 | `.local/bin`이 없는 경우에만 / **bash 사용자는 수동 추가 필요** |
+| MCP 서버 등록 | Claude Desktop / Claude Code / Gemini CLI 설정에 자동 등록 | 해당 앱이 설치된 경우에만 |
+| DB 초기화 | `~/.nexus/` 데이터베이스 생성 + 스키마 마이그레이션 적용 | |
 
-> Ollama는 자동 설치되지 않습니다. 벡터 검색을 원하면 [Setup 0단계](#0-ollama-설치-벡터-검색)를 참고하세요.
+**자동으로 처리되지 않는 항목:**
+- **Ollama** — 벡터/하이브리드 검색을 원하면 [Setup 0단계](#0-ollama-설치-벡터-검색)를 참고하세요. 키워드 검색만 쓴다면 불필요합니다.
+- **볼트 등록 및 인덱싱** — 앱 UI 또는 CLI에서 직접 진행해야 합니다.
 
 **"앱이 손상되었습니다" 오류 해결:**
 
