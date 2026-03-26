@@ -189,9 +189,22 @@ fn handle_tools_list(id: &Value) -> Value {
                         "properties": {
                             "project": { "type": "string", "description": "Project name or ID" },
                             "path": { "type": "string", "description": "File path relative to vault root" },
-                            "heading": { "type": "string", "description": "Heading text to extract (e.g. 'Introduction')" }
+                            "heading": { "type": "string", "description": "Heading text to extract (e.g. 'Introduction')" },
+                            "heading_path": { "type": "string", "description": "Full heading path from TOC (e.g. 'Parent > Child'), used to disambiguate duplicate headings" }
                         },
                         "required": ["project", "path", "heading"]
+                    }
+                },
+                {
+                    "name": "nexus_get_toc",
+                    "description": "Return the table of contents for a document. Each entry contains heading, level, and heading_path. Use heading_path when calling nexus_get_section to disambiguate duplicate headings.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Project name or ID" },
+                            "path": { "type": "string", "description": "File path relative to vault root" }
+                        },
+                        "required": ["project", "path"]
                     }
                 },
                 {
@@ -297,6 +310,7 @@ fn handle_tools_call(id: &Value, params: &Value, pool: &nexus_core::db::sqlite::
         "nexus_index_project" => tool_index_project(&args, pool),
         "nexus_sync_config" => tool_sync_config(&args, pool),
         "nexus_get_section" => tool_get_section(&args, pool),
+        "nexus_get_toc" => tool_get_toc(&args, pool),
         "nexus_get_backlinks" => tool_get_backlinks(&args, pool),
         "nexus_get_links" => tool_get_links(&args, pool),
         "nexus_resolve_alias" => tool_resolve_alias(&args, pool),
@@ -416,8 +430,17 @@ fn tool_get_section(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std:
     let project = args.get("project").and_then(|p| p.as_str()).ok_or("Missing 'project'")?;
     let path = args.get("path").and_then(|p| p.as_str()).ok_or("Missing 'path'")?;
     let heading = args.get("heading").and_then(|h| h.as_str()).ok_or("Missing 'heading'")?;
+    let heading_path = args.get("heading_path").and_then(|h| h.as_str());
     let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
-    nexus_core::search::get_section(pool, &proj.id, path, heading).map_err(|e| e.to_string())
+    nexus_core::search::get_section(pool, &proj.id, path, heading, heading_path).map_err(|e| e.to_string())
+}
+
+fn tool_get_toc(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
+    let project = args.get("project").and_then(|p| p.as_str()).ok_or("Missing 'project'")?;
+    let path = args.get("path").and_then(|p| p.as_str()).ok_or("Missing 'path'")?;
+    let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
+    let entries = nexus_core::search::get_toc(pool, &proj.id, path).map_err(|e| e.to_string())?;
+    serde_json::to_string(&entries).map_err(|e| e.to_string())
 }
 
 fn tool_get_metadata(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {

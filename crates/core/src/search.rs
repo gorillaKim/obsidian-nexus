@@ -771,8 +771,71 @@ pub fn record_view(pool: &DbPool, document_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Table of Contents entry
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TocEntry {
+    pub heading: String,
+    pub level: usize,
+    pub heading_path: String,
+}
+
+/// Get the table of contents for a document
+pub fn get_toc(pool: &DbPool, project_id: &str, file_path: &str) -> Result<Vec<TocEntry>> {
+    let conn = pool.get()?;
+    let doc_id: String = conn.query_row(
+        "SELECT id FROM documents WHERE project_id = ?1 AND file_path = ?2",
+        [project_id, file_path],
+        |row| row.get(0),
+    ).map_err(|_| crate::error::NexusError::DocumentNotFound(file_path.to_string()))?;
+
+    let mut stmt = conn.prepare(
+        "SELECT heading_path FROM chunks
+         WHERE document_id = ?1 AND heading_path IS NOT NULL
+         GROUP BY heading_path
+         ORDER BY MIN(chunk_index)"
+    )?;
+
+    let heading_paths: Vec<String> = stmt
+        .query_map([&doc_id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    let entries: Vec<TocEntry> = heading_paths
+        .into_iter()
+        .map(|hp| {
+            let parts: Vec<&str> = hp.split(" > ").collect();
+            let heading = parts.last().copied().unwrap_or("").to_string();
+            let level = parts.len();
+            TocEntry { heading, level, heading_path: hp }
+        })
+        .collect();
+
+    Ok(entries)
+}
+
 /// Get a specific section of a document by heading path
-pub fn get_section(pool: &DbPool, project_id: &str, file_path: &str, heading: &str) -> Result<String> {
+pub fn get_section(pool: &DbPool, project_id: &str, file_path: &str, heading: &str, heading_path: Option<&str>) -> Result<String> {
+    if let Some(hp) = heading_path {
+        let conn = pool.get()?;
+        let doc_id: String = conn.query_row(
+            "SELECT id FROM documents WHERE project_id = ?1 AND file_path = ?2",
+            [project_id, file_path],
+            |row| row.get(0),
+        ).map_err(|_| crate::error::NexusError::DocumentNotFound(file_path.to_string()))?;
+
+        let mut stmt = conn.prepare(
+            "SELECT content FROM chunks WHERE document_id = ?1 AND heading_path = ?2 ORDER BY chunk_index"
+        )?;
+        let parts: Vec<String> = stmt
+            .query_map([&doc_id, hp], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+
+        if parts.is_empty() {
+            return Err(crate::error::NexusError::DocumentNotFound(
+                format!("Section '{}' not found in {}", hp, file_path)
+            ));
+        }
+        return Ok(parts.join("\n"));
+    }
+
     let content = get_document_content(pool, project_id, file_path)?;
     let mut in_section = false;
     let mut section_level = 0usize;

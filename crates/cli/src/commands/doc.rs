@@ -132,7 +132,7 @@ pub fn handle(pool: &DbPool, cmd: DocCommands, format: &str) -> Result<()> {
         }
         DocCommands::Section { project, path, heading } => {
             let proj = nexus_core::project::get_project(pool, &project)?;
-            let section = nexus_core::search::get_section(pool, &proj.id, &path, &heading)?;
+            let section = nexus_core::search::get_section(pool, &proj.id, &path, &heading, None)?;
             println!("{}", section);
         }
         DocCommands::Backlinks { project, path } => {

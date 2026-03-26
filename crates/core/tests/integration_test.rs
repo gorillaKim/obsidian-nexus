@@ -640,3 +640,67 @@ Content about something else.
         results[0].file_path
     );
 }
+
+#[test]
+fn test_get_toc_returns_sections() {
+    let (pool, vault) = setup();
+
+    // rust-guide.md has: # Rust Guide, ## Ownership, ## Borrowing
+    let proj = project::add_project(&pool, "toc-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    let toc = search::get_toc(&pool, &proj.id, "rust-guide.md").unwrap();
+    assert!(!toc.is_empty(), "TOC should not be empty");
+
+    let headings: Vec<&str> = toc.iter().map(|e| e.heading.as_str()).collect();
+    assert!(headings.contains(&"Ownership"), "Should contain 'Ownership'");
+    assert!(headings.contains(&"Borrowing"), "Should contain 'Borrowing'");
+
+    // level 확인
+    let ownership = toc.iter().find(|e| e.heading == "Ownership").unwrap();
+    assert_eq!(ownership.level, 2, "## heading should be level 2");
+}
+
+#[test]
+fn test_get_toc_heading_path_format() {
+    let (pool, vault) = setup();
+    let proj = project::add_project(&pool, "toc-path-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    let toc = search::get_toc(&pool, &proj.id, "rust-guide.md").unwrap();
+    // heading_path는 계층 경로여야 함
+    for entry in &toc {
+        assert!(!entry.heading_path.is_empty(), "heading_path should not be empty");
+        assert_eq!(entry.heading_path.split(" > ").last().unwrap(), entry.heading,
+            "Last segment of heading_path should match heading");
+    }
+}
+
+#[test]
+fn test_get_section_with_heading_path() {
+    let (pool, vault) = setup();
+    let proj = project::add_project(&pool, "section-hp-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    // TOC에서 heading_path 얻기
+    let toc = search::get_toc(&pool, &proj.id, "rust-guide.md").unwrap();
+    let ownership_entry = toc.iter().find(|e| e.heading == "Ownership").unwrap();
+
+    // heading_path로 섹션 조회
+    let content = search::get_section(
+        &pool, &proj.id, "rust-guide.md",
+        &ownership_entry.heading,
+        Some(&ownership_entry.heading_path),
+    ).unwrap();
+    assert!(content.contains("소유권"), "Should contain ownership content");
+}
+
+#[test]
+fn test_get_toc_nonexistent_document() {
+    let (pool, vault) = setup();
+    let proj = project::add_project(&pool, "toc-notfound-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    let result = search::get_toc(&pool, &proj.id, "nonexistent.md");
+    assert!(result.is_err(), "Should return error for nonexistent document");
+}
