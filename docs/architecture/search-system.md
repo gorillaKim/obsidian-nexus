@@ -12,7 +12,7 @@ aliases:
 
 # 검색 시스템
 
-## 검색 모드 3가지
+## 검색 모드 4가지
 
 ### 1. 키워드 검색 (FTS5)
 
@@ -39,6 +39,12 @@ SELECT ... FROM vec_chunks WHERE embedding MATCH ?1 AND k = ?2
 
 - 임베딩 정규화: L2 거리 ≈ 코사인 유사도 (수학적 동치)
 - `min_vector_score` (기본 0.65)로 노이즈 필터링
+- 첫 번째 청크 임베딩 시 alias를 포함한 텍스트로 강화 (최대 5개):
+  ```
+  제목: {title}
+  별칭: {a1, a2, ...}
+  {content}
+  ```
 
 ### 3. 하이브리드 검색 (기본)
 
@@ -50,6 +56,20 @@ RRF_score = (1-weight) × 1/(rank_fts + 60) + weight × 1/(rank_vec + 60)
 
 - `hybrid_weight` (기본 0.7): 벡터 70%, 키워드 30%
 - 쿼리 길이 자동 조정: 2자 이하 ×0.3, 4자 이하 ×0.6
+
+### 4. LLM 쿼리 재작성 (선택적)
+
+Ollama `/api/generate`를 활용해 자연어 쿼리를 검색에 유리한 형태로 재작성. 기존 임베딩 Ollama 인프라를 재활용하며, 실패 시 원본 쿼리로 graceful fallback.
+
+활성화 방법:
+- `config.toml` `[llm]` 섹션: `enabled = true`, `model = "mistral"`
+- `nexus_search(rewrite_query=true)`로 요청별 활성화 (keyword / vector / hybrid 모든 모드 지원)
+
+보안 처리:
+- 출력 첫 라인만 추출, 원본 길이 3배 상한 (프롬프트 인젝션 방어)
+- 타임아웃 config화: `timeout_secs` (기본 5초, CPU Ollama 환경은 15초 권장)
+
+**효과:** 사용자 자연어(UX 용어) ↔ 문서 기술 용어 간 semantic gap 해소
 
 ## 메타데이터 리랭킹
 
@@ -79,13 +99,24 @@ RRF_score = (1-weight) × 1/(rank_fts + 60) + weight × 1/(rank_vec + 60)
 - 언더스코어 분리: `wiki_links` → `"wiki_links" OR "wiki" OR "links"`
 - 짧은 쿼리(≤3자): 프리픽스 매칭 (`앱` → `"앱" OR 앱*`)
 
-## Alias Fallback
+## Alias 매칭
 
-FTS5 결과가 limit 미만일 때, `document_aliases` 테이블을 LIKE 검색하여 추가 결과를 보충합니다.
+FTS5 `chunks_fts`에 `aliases` 컬럼이 통합되어 (V6 마이그레이션) alias 키워드도 BM25로 랭킹됩니다.
 
-- frontmatter의 `aliases` 필드에 등록된 별칭으로 검색 가능
+```sql
+bm25(chunks_fts, 1.0, 0.5, 5.0)  -- aliases 컬럼 5배 가중치
+```
+
+- alias 매칭 문서가 랭킹 상위에 자동 배치
+- 다중 alias 매칭 시 score 우위 반영
+- `document_aliases` 테이블은 `nexus_get_backlinks` / `nexus_resolve_alias` 도구 호환성을 위해 유지
+
+**Fallback (limit 미만 시):** 쿼리를 토큰으로 분리하여 OR 조건으로 추가 검색
+```
+"overview 페이지 리뉴얼" → LIKE '%overview%' OR LIKE '%페이지%' OR LIKE '%리뉴얼%'
+```
+
 - 예: "데이터독"으로 검색 → 본문은 "Datadog"이지만 alias "데이터독"으로 매칭
-- FTS5 결과에 이미 포함된 문서는 중복 제거
 
 ## 태그 기반 검색
 

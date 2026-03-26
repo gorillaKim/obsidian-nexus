@@ -29,6 +29,7 @@ aliases:
 | use_popularity | boolean | - | 프로젝트 필터 시 true | 인기도 부스트 |
 | tags | string[] | - | - | 태그 필터 (예: ["rust", "api"]) |
 | tag_match_all | boolean | - | false | true: AND 조건 (모든 태그 매칭), false: OR 조건 |
+| rewrite_query | boolean | - | false | LLM으로 쿼리 재작성 (Ollama 필요, 모든 검색 모드 지원) |
 
 ## 문서 읽기
 
@@ -143,7 +144,7 @@ heading 기반 섹션 부분 읽기. 토큰 절약에 유용.
   "database": {
     "exists": true,
     "path": "~/.nexus/nexus.db",
-    "schema_version": 5,
+    "schema_version": 6,
     "project_count": 3,
     "document_count": 142
   },

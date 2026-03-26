@@ -127,8 +127,19 @@ fn index_single_file(
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .replace('-', " ");
+    // Minimum word count for embedding: very short chunks (< 4 words) produce hub vectors
+    // in the embedding space that match any query, polluting vector search results.
+    // chunk 0 gets title+alias prefix from build_embed_text, so its effective word count
+    // is higher than raw content — this asymmetry is intentional (chunk 0 benefits from
+    // title signal; non-first chunks use raw content only).
+    const MIN_EMBED_WORD_COUNT: usize = 4;
+
     let embeddings: Vec<Option<Vec<f32>>> = parsed.chunks.iter().enumerate().map(|(i, chunk)| {
         let text = build_embed_text(embed_title, &embed_file_stem, &parsed.aliases, &chunk.content, i);
+        // Skip embedding if text is too short — avoids vector space hub pollution
+        if text.split_whitespace().count() < MIN_EMBED_WORD_COUNT {
+            return None;
+        }
         match crate::embedding::embed_text(config, &text) {
             Ok(mut vec) => {
                 crate::embedding::normalize(&mut vec);
@@ -536,6 +547,36 @@ mod tests {
         let aliases = vec!["SomeAlias".to_string()];
         let text = build_embed_text("Title", "file", &aliases, "content", 1);
         assert_eq!(text, "content", "non-first chunk must return raw content only");
+    }
+
+    #[test]
+    fn test_short_embed_text_skipped() {
+        // MIN_EMBED_WORD_COUNT = 4: texts with fewer words must produce None in the
+        // embeddings pipeline. We test build_embed_text directly for the boundary cases.
+
+        // 3 words → below threshold
+        let short = build_embed_text("", "", &[], "채택 (Accepted)", 1);
+        assert!(
+            short.split_whitespace().count() < 4,
+            "raw short chunk should have < 4 words, got: {:?}",
+            short
+        );
+
+        // chunk 0 with title prefix → above threshold even with short content
+        let with_prefix = build_embed_text("My Title", "my-file", &[], "짧음", 0);
+        assert!(
+            with_prefix.split_whitespace().count() >= 4,
+            "chunk 0 with title prefix should have >= 4 words, got: {:?}",
+            with_prefix
+        );
+
+        // chunk 1 with same short content → still below threshold
+        let non_first = build_embed_text("My Title", "my-file", &[], "짧음", 1);
+        assert!(
+            non_first.split_whitespace().count() < 4,
+            "non-first chunk with short content should have < 4 words, got: {:?}",
+            non_first
+        );
     }
 
     #[test]

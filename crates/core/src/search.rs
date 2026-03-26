@@ -427,8 +427,10 @@ pub fn vector_search(
             }
         }
 
-        // Convert L2 distance to cosine similarity for normalized vectors
-        let similarity = 1.0 - (distance * distance) / 2.0;
+        // Convert L2 distance to cosine similarity for normalized vectors.
+        // Clamp to [0.0, 1.0]: floating-point precision can produce values slightly > 1.0
+        // with near-identical vectors, which is mathematically invalid.
+        let similarity = (1.0 - (distance * distance) / 2.0).clamp(0.0, 1.0);
 
         if similarity < min_score {
             continue;
@@ -613,13 +615,19 @@ pub fn enrich_results(
 
         let mut boost = 0.0_f64;
 
-        // Title match boost: if heading_path top-level matches document title
+        // Title match boost: chunk whose first heading matches the document title
+        // gets a strong boost — title-named docs are almost always the most relevant
+        // for queries that match the title. Increased from 0.10 → 0.25 to overcome
+        // BM25 frequency bias (docs that merely mention the title phrase many times).
         if let Some((Some(ref title), _)) = doc_meta.get(&r.document_id) {
             if let Some(ref heading) = r.heading_path {
                 let first_heading = heading.split(" > ").next().unwrap_or("");
-                if first_heading == title.as_str() {
-                    boost += 0.10;
+                if first_heading.eq_ignore_ascii_case(title.as_str()) {
+                    boost += 0.25;
                 }
+            } else {
+                // No heading_path means this is the document root chunk — also a strong signal
+                boost += 0.15;
             }
         }
 
@@ -779,7 +787,7 @@ pub fn resolve_by_alias(pool: &DbPool, project_id: &str, alias: &str) -> Result<
         "SELECT d.id, d.file_path, d.title, d.indexing_status, d.last_indexed
          FROM document_aliases da
          JOIN documents d ON da.document_id = d.id
-         WHERE d.project_id = ?1 AND da.alias = ?2
+         WHERE d.project_id = ?1 AND LOWER(da.alias) = LOWER(?2)
          LIMIT 1",
         params![project_id, alias],
         |row| {

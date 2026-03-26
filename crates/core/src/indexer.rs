@@ -35,8 +35,13 @@ pub fn parse_markdown(content: &str, chunk_size: usize, chunk_overlap: usize) ->
     // 1. Extract frontmatter
     let (frontmatter, body, mut tags) = extract_frontmatter(content);
 
-    // 2. Extract title from first H1
-    let title = extract_title(&body);
+    // 2. Extract title: H1 first, then frontmatter `title` field as fallback
+    let title = extract_title(&body).or_else(|| {
+        frontmatter.as_ref()
+            .and_then(|fm| fm.get("title"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    });
 
     // 3. Split into sections by headings
     let sections = split_by_headings(&body);
