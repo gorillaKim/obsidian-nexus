@@ -1414,26 +1414,24 @@ fn run_onboard(project_path: String) -> Result<Vec<nexus_core::onboard::OnboardS
 }
 
 fn which_nexus_mcp() -> std::path::PathBuf {
-    // Try common paths
-    let home = dirs::home_dir().unwrap_or_default();
-    let local_bin = home.join(".local").join("bin").join("nexus-mcp-server");
-    if local_bin.exists() {
-        return local_bin;
-    }
-
-    // Fallback: try which
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("nexus-mcp-server")
-        .output()
-    {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return std::path::PathBuf::from(path);
+    // For the Agent SDK, always prefer the app bundle binary (code-signed).
+    // ~/.local/bin copies lack a signature and macOS SIGKILL them when spawned
+    // as subprocesses by a signed app.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let sidecar_name = format!("nexus-mcp-server-{}", target_triple());
+            let candidate = dir.join(&sidecar_name);
+            if candidate.exists() {
+                return candidate;
+            }
+            let candidate = dir.join("nexus-mcp-server");
+            if candidate.exists() {
+                return candidate;
+            }
         }
     }
-
-    // Last resort
-    local_bin
+    // Fallback to ~/.local/bin
+    dirs::home_dir().unwrap_or_default().join(".local/bin/nexus-mcp-server")
 }
 
 fn main() {
