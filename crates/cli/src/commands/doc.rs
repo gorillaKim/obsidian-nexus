@@ -57,6 +57,13 @@ pub enum DocCommands {
         /// File path (relative to vault root)
         path: String,
     },
+    /// Get table of contents for a document
+    Toc {
+        /// Project ID or name
+        project: String,
+        /// File path (relative to vault root)
+        path: String,
+    },
 }
 
 pub fn handle(pool: &DbPool, cmd: DocCommands, format: &str) -> Result<()> {
@@ -163,6 +170,18 @@ pub fn handle(pool: &DbPool, cmd: DocCommands, format: &str) -> Result<()> {
                         let status = if link.resolved { "✓" } else { "✗" };
                         println!("[{}] {} — {}", status, link.target_path, link.display_text.as_deref().unwrap_or(""));
                     }
+                }
+            }
+        }
+        DocCommands::Toc { project, path } => {
+            let proj = nexus_core::project::get_project(pool, &project)?;
+            let toc = nexus_core::search::get_toc(pool, &proj.id, &path)?;
+            if format == "json" {
+                println!("{}", serde_json::to_string_pretty(&toc)?);
+            } else {
+                for entry in &toc {
+                    let indent = "  ".repeat(entry.level.saturating_sub(1));
+                    println!("{}{}. {}", indent, entry.level, entry.heading);
                 }
             }
         }
