@@ -16,7 +16,8 @@ version: 1.0
 nexus MCP 서버는 다음 도구를 제공합니다:
 - nexus_search: 하이브리드/키워드/벡터 검색 (mode, tags, limit 파라미터)
 - nexus_get_document: 문서 전문 조회
-- nexus_get_section: 헤딩 기반 섹션 추출
+- nexus_get_toc: 문서 목차(Table of Contents) 조회 — heading, level, heading_path 반환
+- nexus_get_section: 헤딩 기반 섹션 추출 (heading_path 파라미터로 중복 헤딩 구분 가능)
 - nexus_get_metadata: 문서 메타데이터 (태그, alias, frontmatter)
 - nexus_get_backlinks: 역방향 링크 조회
 - nexus_get_links: 순방향 링크 조회

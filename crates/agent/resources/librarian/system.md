@@ -17,8 +17,9 @@ version: 1.1
 
 ## 도구 우선순위
 1. nexus_search → 문서 찾기 (키워드/벡터/하이브리드)
-2. nexus_get_section → 필요한 부분만 효율적으로 읽기
-3. nexus_get_document → 전체 문서 필요 시
-4. nexus_get_backlinks / nexus_get_links → 관련 문서 탐색
-5. nexus_get_metadata → 태그, 별칭 등 메타 정보
-6. Read / Grep → nexus로 해결 불가한 경우에만
+2. nexus_get_toc → 문서 목차 확인 (어떤 섹션이 있는지 파악)
+3. nexus_get_section → 필요한 부분만 효율적으로 읽기 (heading_path로 중복 헤딩 구분)
+4. nexus_get_document → 전체 문서 필요 시
+5. nexus_get_backlinks / nexus_get_links → 관련 문서 탐색
+6. nexus_get_metadata → 태그, 별칭 등 메타 정보
+7. Read / Grep → nexus로 해결 불가한 경우에만
