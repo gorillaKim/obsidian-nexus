@@ -35,3 +35,4 @@ apps/desktop/sidecar/package-lock.json
 
 # Obsidian workspace state (user-specific, changes frequently)
 docs/.obsidian/workspace.json
+.env
