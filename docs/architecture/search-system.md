@@ -8,6 +8,9 @@ tags:
 aliases:
   - Search System
   - 하이브리드 검색
+  - 의미 유사도 검색
+  - 벡터 검색 원리
+  - 시맨틱 검색
 ---
 
 # 검색 시스템
@@ -39,9 +42,17 @@ SELECT ... FROM vec_chunks WHERE embedding MATCH ?1 AND k = ?2
 
 - 임베딩 정규화: L2 거리 ≈ 코사인 유사도 (수학적 동치)
 - `min_vector_score` (기본 0.65)로 노이즈 필터링
-- 첫 번째 청크 임베딩 시 alias를 포함한 텍스트로 강화 (최대 5개):
+- **모든 청크**에 프로젝트·태그 prefix 삽입 (허브 벡터 방지):
   ```
-  제목: {title}
+  프로젝트: {project_name}
+  태그: {tag1, tag2, ...}
+  {content}
+  ```
+- 첫 번째 청크(chunk_0)는 추가로 제목·alias prefix 포함:
+  ```
+  프로젝트: {project_name}
+  태그: {tag1, tag2, ...}
+  제목: {title} {file_stem}
   별칭: {a1, a2, ...}
   {content}
   ```
@@ -52,7 +63,17 @@ SELECT ... FROM vec_chunks WHERE embedding MATCH ?1 AND k = ?2
 
 **이유:** "채택 (Accepted)" 같은 짧은 micro-chunk는 벡터 공간에서 허브를 형성하여 모든 쿼리에 높은 유사도를 반환하는 노이즈 원인이 된다.
 
-**비대칭 처리:** chunk 0(첫 번째 청크)은 `build_embed_text()`가 `제목: {title}\n별칭: {...}\n{content}` prefix를 포함하므로, 본문이 짧더라도 유효 단어 수가 충분히 높아 별도 예외 없이 동일 기준을 적용한다.
+**비대칭 처리:** chunk 0(첫 번째 청크)은 `build_embed_text()`가 title+alias prefix를 포함하므로, 본문이 짧더라도 유효 단어 수가 충분히 높아 별도 예외 없이 동일 기준을 적용한다.
+
+#### 허브 벡터 문제 (Hub Vector Problem)
+
+**현상:** 짧고 도메인 중립적인 청크(예: "등록된 모든 프로젝트(볼트) 목록.")가 벡터 공간의 중심(centroid) 근처에 위치하여 모든 쿼리에 높은 유사도를 반환.
+
+**원인:** 내용 자체에 도메인 특정 정보가 없으면, 임베딩이 언어 모델의 일반 공간 중심에 수렴함.
+
+**대응:** 프로젝트명 + 태그를 모든 청크 임베딩 텍스트에 prefix로 삽입 → 청크가 자신이 속한 도메인 쪽으로 이동, 범용 쿼리와의 거짓 유사도 감소.
+
+**추가 예방:** 문서에 `tags` frontmatter가 없으면 허브 벡터가 발생하기 쉬움 — 모든 문서에 적절한 태그 등록 권장.
 
 ### 3. 하이브리드 검색 (기본)
 
@@ -183,3 +204,4 @@ nexus_search({
 - [[03-MCP-도구-레퍼런스]]
 - [[05-설정-가이드]]
 - [[ADR-009: 검색 품질 개선 — Micro-chunk 임베딩 스킵 & Title Fallback]]
+- [[ADR-010: 임베딩 컨텍스트 Prefix — 프로젝트·태그 기반 허브 벡터 방지]]

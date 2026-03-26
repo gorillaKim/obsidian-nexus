@@ -396,6 +396,14 @@ export function SearchView(props: SearchViewProps) {
                 <span className="text-sm text-[var(--text-tertiary)] truncate mr-2">{viewingDoc.filePath}</span>
                 <div className="flex gap-2">
                   <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => viewDocument(viewingDoc.projectId, viewingDoc.filePath)}
+                    title="문서 내용 새로고침"
+                  >
+                    <RefreshCw size={12} className="mr-1" /> 새로고침
+                  </Button>
+                  <Button
                     variant="primary"
                     size="sm"
                     onClick={() => {

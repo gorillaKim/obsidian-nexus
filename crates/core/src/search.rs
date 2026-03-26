@@ -21,6 +21,10 @@ pub struct SearchResult {
     pub view_count: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_modified: Option<String>,
+    /// "hybrid" | "keyword_only" — keyword_only means vector search was unavailable.
+    /// Only populated on the first result to signal degraded mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_mode: Option<String>,
 }
 
 /// DB 레벨 태그 사전 필터.
@@ -102,6 +106,32 @@ fn get_document_ids_by_tags(
         .collect::<std::result::Result<Vec<_>, _>>()?;
 
     Ok(Some(ids))
+}
+
+/// Sanitize a single token for use inside an FTS5 quoted phrase.
+/// Strips characters that can prematurely close or corrupt a quoted phrase
+/// even after `"` → `""` escaping: parentheses, caret, tilde.
+fn sanitize_fts_token(token: &str) -> String {
+    token
+        .replace('"', "\"\"")
+        .replace(['(', ')', '^', '~'], "")
+}
+
+/// Build a prefix-match FTS query for keyword-only fallback.
+/// Each whitespace-separated token becomes `"token"*`, joined with OR.
+/// This gives better recall for natural-language queries when vector search is unavailable.
+/// Tokens shorter than 2 chars are skipped to reduce noise.
+fn build_prefix_fallback_query(query: &str) -> String {
+    let tokens: Vec<String> = query
+        .split_whitespace()
+        .filter(|w| w.chars().count() >= 2)
+        .map(|w| format!("\"{}\"*", sanitize_fts_token(w)))
+        .collect();
+    if tokens.is_empty() {
+        format!("\"{}\"", sanitize_fts_token(query.trim()))
+    } else {
+        tokens.join(" OR ")
+    }
 }
 
 /// FTS5 keyword search
@@ -232,6 +262,7 @@ fn map_result(row: &rusqlite::Row) -> rusqlite::Result<SearchResult> {
         backlink_count: None,
         view_count: None,
         last_modified: None,
+        search_mode: None,
     })
 }
 
@@ -454,6 +485,7 @@ pub fn vector_search(
             backlink_count: None,
             view_count: None,
             last_modified: None,
+            search_mode: None,
         });
 
         if results.len() >= limit {
@@ -492,7 +524,32 @@ pub fn hybrid_search(
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("Vector search failed, falling back to keyword only: {}", e);
-            return Ok(keyword_results.into_iter().take(limit).collect());
+            // If keyword_results already filled the limit, use them as-is — no need to
+            // re-run with a noisier prefix query.
+            let mut fallback: Vec<SearchResult> = if keyword_results.len() >= limit {
+                keyword_results.into_iter().take(limit).collect()
+            } else {
+                // Re-run FTS with prefix-match tokens for better recall on semantic queries,
+                // then merge: original exact-match results first, then any new prefix matches.
+                let fallback_query = build_prefix_fallback_query(query);
+                let prefix_results = fts_search(pool, &fallback_query, project_id, limit * 2, tag_filter)
+                    .unwrap_or_default();
+                let existing_ids: std::collections::HashSet<String> =
+                    keyword_results.iter().map(|r| r.chunk_id.clone()).collect();
+                let mut merged: Vec<SearchResult> = keyword_results;
+                for r in prefix_results {
+                    if !existing_ids.contains(&r.chunk_id) {
+                        merged.push(r);
+                    }
+                }
+                merged.truncate(limit);
+                merged
+            };
+            // Signal degraded mode on every result so callers can surface a warning.
+            for r in &mut fallback {
+                r.search_mode = Some("keyword_only".to_string());
+            }
+            return Ok(fallback);
         }
     };
 
@@ -615,6 +672,25 @@ pub fn enrich_results(
 
         let mut boost = 0.0_f64;
 
+        // Path-based boost: authoritative paths get a small lift, ephemeral paths a penalty.
+        // Prevents context/devlog documents (high keyword frequency) from outranking
+        // architecture/guide documents on conceptual queries.
+        // NOTE: path names follow the obsidian-nexus default vault structure.
+        // Matches both root-level ("architecture/foo.md") and nested ("docs/architecture/foo.md").
+        {
+            let p = r.file_path.as_str();
+            let is_authoritative = p.starts_with("architecture/") || p.contains("/architecture/")
+                || p.starts_with("guides/") || p.contains("/guides/")
+                || p.starts_with("overview/") || p.contains("/overview/");
+            let is_ephemeral = p.starts_with("context/") || p.contains("/context/")
+                || p.starts_with("devlog/") || p.contains("/devlog/");
+            if is_authoritative {
+                boost += 0.05;
+            } else if is_ephemeral {
+                boost -= 0.03;
+            }
+        }
+
         // Title match boost: chunk whose first heading matches the document title
         // gets a strong boost — title-named docs are almost always the most relevant
         // for queries that match the title. Increased from 0.10 → 0.25 to overcome
@@ -638,12 +714,20 @@ pub fn enrich_results(
             }
         }
 
+        // Full boost budget summary (multiplicative: score *= 1.0 + boost):
+        //   path boost:       -0.03 ~ +0.05
+        //   title match:      +0.15 ~ +0.25
+        //   heading depth:    +0.05
+        //   popularity:       0    ~ +0.035  (tiebreaker only)
+        //   max total boost:  ~0.385 (authoritative doc with exact title + top heading + popular)
         if use_popularity {
+            // Popularity acts as a tiebreaker only — kept very small so it never
+            // overrides content relevance. Max: backlink ~0.02 + view ~0.015 = ~0.035.
             let bl = r.backlink_count.unwrap_or(0) as f64;
-            boost += (bl * 0.02).min(0.20);
+            boost += (bl * 0.002).min(0.02);
             let vc = r.view_count.unwrap_or(0) as f64;
             if vc > 0.0 {
-                boost += ((vc + 1.0).ln() * 0.03).min(0.15);
+                boost += ((vc + 1.0).ln() * 0.003).min(0.015);
             }
         }
 

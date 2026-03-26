@@ -62,7 +62,7 @@ pub fn index_project(pool: &DbPool, project_id: &str, full: bool) -> Result<Inde
         }
 
         // UoW: index this file atomically
-        match index_single_file(pool, &proj.id, &rel_path, &content, &new_hash, &config) {
+        match index_single_file(pool, &proj.id, &proj.name, &rel_path, &content, &new_hash, &config) {
             Ok(_) => report.indexed += 1,
             Err(e) => {
                 tracing::error!("Failed to index {}: {}", rel_path, e);
@@ -107,6 +107,7 @@ pub fn index_project(pool: &DbPool, project_id: &str, full: bool) -> Result<Inde
 fn index_single_file(
     pool: &DbPool,
     project_id: &str,
+    project_name: &str,
     file_path: &str,
     content: &str,
     content_hash: &str,
@@ -135,7 +136,7 @@ fn index_single_file(
     const MIN_EMBED_WORD_COUNT: usize = 4;
 
     let embeddings: Vec<Option<Vec<f32>>> = parsed.chunks.iter().enumerate().map(|(i, chunk)| {
-        let text = build_embed_text(embed_title, &embed_file_stem, &parsed.aliases, &chunk.content, i);
+        let text = build_embed_text(embed_title, &embed_file_stem, &parsed.aliases, &chunk.content, i, project_name, &parsed.tags);
         // Skip embedding if text is too short — avoids vector space hub pollution
         if text.split_whitespace().count() < MIN_EMBED_WORD_COUNT {
             return None;
@@ -352,17 +353,31 @@ pub struct IndexReport {
 const MAX_ALIAS_COUNT: usize = 5;
 
 /// Build the text input for embedding a chunk.
-/// For the first chunk (index 0), prepends title, file stem, and up to MAX_ALIAS_COUNT aliases.
-/// Remaining chunks use raw content to avoid redundant prefix storage.
+/// Builds the text used for embedding a chunk.
+/// All chunks get a `프로젝트:` prefix (and `태그:` if present) to anchor the embedding
+/// to its project/document context, reducing hub-vector pollution from generic short phrases.
+/// The first chunk (index 0) additionally gets `제목:` and `별칭:` prefixes.
 pub(crate) fn build_embed_text(
     title: &str,
     file_stem: &str,
     aliases: &[String],
     content: &str,
     chunk_index: usize,
+    project_name: &str,
+    tags: &[String],
 ) -> String {
+    let project_part = if project_name.is_empty() {
+        String::new()
+    } else {
+        format!("프로젝트: {}\n", project_name)
+    };
+    let tag_part = if tags.is_empty() {
+        String::new()
+    } else {
+        format!("태그: {}\n", tags.join(", "))
+    };
     if chunk_index != 0 {
-        return content.to_string();
+        return format!("{}{}{}", project_part, tag_part, content);
     }
     let alias_part = if aliases.is_empty() {
         String::new()
@@ -370,7 +385,7 @@ pub(crate) fn build_embed_text(
         let limited: Vec<&str> = aliases.iter().take(MAX_ALIAS_COUNT).map(|s| s.as_str()).collect();
         format!("별칭: {}\n", limited.join(", "))
     };
-    format!("제목: {} {}\n{}{}", title, file_stem, alias_part, content)
+    format!("{}{}제목: {} {}\n{}{}", project_part, tag_part, title, file_stem, alias_part, content)
 }
 
 #[cfg(test)]
@@ -528,7 +543,9 @@ mod tests {
     #[test]
     fn test_build_embed_text_with_aliases() {
         let aliases = vec!["별칭A".to_string(), "AliasB".to_string()];
-        let text = build_embed_text("My Title", "my-file", &aliases, "본문 내용", 0);
+        let text = build_embed_text("My Title", "my-file", &aliases, "본문 내용", 0, "TestProject", &["tag1".to_string()]);
+        assert!(text.contains("프로젝트: TestProject"), "project prefix missing");
+        assert!(text.contains("태그: tag1"), "tag prefix missing");
         assert!(text.contains("제목: My Title my-file"), "title prefix missing");
         assert!(text.contains("별칭: 별칭A, AliasB"), "aliases prefix missing");
         assert!(text.contains("본문 내용"), "content missing");
@@ -536,7 +553,8 @@ mod tests {
 
     #[test]
     fn test_build_embed_text_no_aliases() {
-        let text = build_embed_text("Title", "file", &[], "content", 0);
+        let text = build_embed_text("Title", "file", &[], "content", 0, "Proj", &[]);
+        assert!(text.contains("프로젝트: Proj"));
         assert!(text.contains("제목: Title file"));
         assert!(!text.contains("별칭:"), "should not have alias prefix when no aliases");
         assert!(text.contains("content"));
@@ -545,8 +563,10 @@ mod tests {
     #[test]
     fn test_build_embed_text_non_first_chunk() {
         let aliases = vec!["SomeAlias".to_string()];
-        let text = build_embed_text("Title", "file", &aliases, "content", 1);
-        assert_eq!(text, "content", "non-first chunk must return raw content only");
+        let text = build_embed_text("Title", "file", &aliases, "content", 1, "Proj", &["t".to_string()]);
+        assert!(text.contains("프로젝트: Proj"), "non-first chunk must have project prefix");
+        assert!(text.contains("태그: t"), "non-first chunk must have tag prefix");
+        assert!(text.ends_with("content"), "content must be last");
     }
 
     #[test]
@@ -555,7 +575,7 @@ mod tests {
         // embeddings pipeline. We test build_embed_text directly for the boundary cases.
 
         // 3 words → below threshold
-        let short = build_embed_text("", "", &[], "채택 (Accepted)", 1);
+        let short = build_embed_text("", "", &[], "채택 (Accepted)", 1, "", &[]);
         assert!(
             short.split_whitespace().count() < 4,
             "raw short chunk should have < 4 words, got: {:?}",
@@ -563,7 +583,7 @@ mod tests {
         );
 
         // chunk 0 with title prefix → above threshold even with short content
-        let with_prefix = build_embed_text("My Title", "my-file", &[], "짧음", 0);
+        let with_prefix = build_embed_text("My Title", "my-file", &[], "짧음", 0, "Proj", &[]);
         assert!(
             with_prefix.split_whitespace().count() >= 4,
             "chunk 0 with title prefix should have >= 4 words, got: {:?}",
@@ -571,7 +591,7 @@ mod tests {
         );
 
         // chunk 1 with same short content → still below threshold
-        let non_first = build_embed_text("My Title", "my-file", &[], "짧음", 1);
+        let non_first = build_embed_text("My Title", "my-file", &[], "짧음", 1, "", &[]);
         assert!(
             non_first.split_whitespace().count() < 4,
             "non-first chunk with short content should have < 4 words, got: {:?}",
@@ -582,7 +602,7 @@ mod tests {
     #[test]
     fn test_build_embed_text_alias_limit() {
         let aliases: Vec<String> = (0..8).map(|i| format!("Alias{i}")).collect();
-        let text = build_embed_text("T", "f", &aliases, "body", 0);
+        let text = build_embed_text("T", "f", &aliases, "body", 0, "P", &[]);
         // 최대 5개만 포함되어야 함
         let alias_line = text.lines().find(|l| l.starts_with("별칭:")).unwrap();
         let count = alias_line.split(',').count();
