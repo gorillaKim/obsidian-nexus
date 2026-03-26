@@ -7,6 +7,7 @@ const NEXUS_TOOLS: &[&str] = &[
     "mcp__nexus__nexus_search",
     "mcp__nexus__nexus_get_document",
     "mcp__nexus__nexus_get_section",
+    "mcp__nexus__nexus_get_toc",
     "mcp__nexus__nexus_resolve_alias",
     "mcp__nexus__nexus_get_backlinks",
     "mcp__nexus__nexus_get_links",
