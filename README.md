@@ -268,6 +268,44 @@ obs-nexus status   # Ollama 연결 + 인덱스 상태 출력
 
 ---
 
+## Claude Code 플러그인으로 활용하기 (jake-marketplace)
+
+[jake-marketplace](https://github.com/gorillaKim/jake-marketplace)는 Claude Code용 개인 플러그인 마켓플레이스입니다. **obsidian-nexus 플러그인**을 설치하면 Claude Code 에이전트가 문서를 자동 생성·관리하고, obs-nexus CLI와 연동하여 지식베이스를 직접 탐색할 수 있습니다.
+
+### 마켓플레이스 + 플러그인 설치
+
+```bash
+# 1. 마켓플레이스 등록
+/plugin marketplace add gorillaProject/jake-marketplace
+
+# 2. obsidian-nexus 플러그인 설치
+/plugin install obsidian-nexus@jake-plugins
+```
+
+> **사전 요구사항:** `obs-nexus` CLI가 설치되어 있어야 합니다 — [Installation 방법 1](#방법-1-curl-스크립트-권장--cli--mcp-서버) 참고.
+
+### 플러그인 제공 스킬
+
+| 스킬 | 명령어 | 동작 |
+|------|--------|------|
+| **onboard** | `/obsidian-nexus:onboard` | 프로젝트 코드베이스 분석 → 인터뷰 → `docs/` 문서 세트 자동 생성 |
+| **librarian** | `/obsidian-nexus:librarian` | obs-nexus CLI 기반 문서 검색, 발견성 개선, 문서 최신화 |
+| **add** | `/obsidian-nexus:add` | devlog, ADR, troubleshooting 등 개별 문서 추가 |
+| **session-devlog** | `/obsidian-nexus:session-devlog` | 현재 세션 대화 내용을 devlog로 자동 정리 |
+| **doctor** | `/obsidian-nexus:doctor` | 문서 상태 진단 (누락, 오래됨, 코드-문서 불일치) |
+
+### 활용 흐름 예시
+
+```
+1. obs-nexus 설치 + 볼트 인덱싱 (본 README Setup 참고)
+2. Claude Code에서 /obsidian-nexus:onboard 실행
+   → 프로젝트 분석 후 docs/ 문서 자동 생성
+3. 개발 중 /obsidian-nexus:librarian 으로 관련 문서 즉시 검색
+4. 작업 완료 후 /obsidian-nexus:session-devlog 로 개발 일지 기록
+```
+
+---
+
 ## Usage
 
 ### CLI
