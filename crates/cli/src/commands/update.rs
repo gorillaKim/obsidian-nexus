@@ -178,7 +178,7 @@ async fn do_update(check_only: bool, format: &str) -> Result<()> {
     fs::create_dir_all(&bin)?;
 
     // Atomic replace: .new → .bak → rename
-    for name in &["nexus", "nexus-mcp-server"] {
+    for name in &["obs-nexus", "nexus-mcp-server"] {
         let src = tmp.path().join(name);
         if !src.exists() {
             continue;

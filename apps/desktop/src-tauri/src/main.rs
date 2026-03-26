@@ -261,30 +261,54 @@ fn target_triple() -> &'static str {
 
 /// Find a sidecar binary bundled with the app.
 /// Tauri places sidecars next to the exe with a target triple suffix.
+///
+/// Selection strategy:
+/// - Collect bundle path (code-signed, always trustworthy) and ~/.local/bin path (user-updated)
+/// - If both exist, pick the one with a newer mtime (i.e. the one updated most recently)
+/// - Fall back to whichever exists alone
+/// - Dev builds (no bundle suffix match) use the binary next to the exe
 fn find_sidecar(name: &str) -> Option<String> {
+    let mut bundle_path: Option<std::path::PathBuf> = None;
+
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             // 1. Bundled sidecar (with target triple suffix)
             let sidecar_name = format!("{}-{}", name, target_triple());
             let candidate = dir.join(&sidecar_name);
             if candidate.exists() {
-                return Some(candidate.to_string_lossy().to_string());
-            }
-            // 2. Same directory without suffix (dev build)
-            let candidate = dir.join(name);
-            if candidate.exists() {
-                return Some(candidate.to_string_lossy().to_string());
+                bundle_path = Some(candidate);
+            } else {
+                // 2. Same directory without suffix (dev build) — use immediately
+                let candidate = dir.join(name);
+                if candidate.exists() {
+                    return Some(candidate.to_string_lossy().to_string());
+                }
             }
         }
     }
-    // 3. ~/.local/bin fallback (symlinked during install)
-    if let Some(home) = dirs::home_dir() {
-        let candidate = home.join(format!(".local/bin/{}", name));
-        if candidate.exists() {
-            return Some(candidate.to_string_lossy().to_string());
-        }
+
+    // 3. ~/.local/bin (user-updated via `obs-nexus update`)
+    let local_path = dirs::home_dir().map(|h| h.join(format!(".local/bin/{}", name)));
+
+    fn mtime(p: &std::path::Path) -> std::time::SystemTime {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
     }
-    None
+
+    match (bundle_path, local_path) {
+        (Some(b), Some(l)) if l.exists() => {
+            // Both exist: prefer whichever is newer
+            if mtime(&l) > mtime(&b) {
+                Some(l.to_string_lossy().to_string())
+            } else {
+                Some(b.to_string_lossy().to_string())
+            }
+        }
+        (Some(b), _) => Some(b.to_string_lossy().to_string()),
+        (None, Some(l)) if l.exists() => Some(l.to_string_lossy().to_string()),
+        _ => None,
+    }
 }
 
 /// Find the MCP server binary path
