@@ -15,6 +15,9 @@ const NEXUS_HELP_TEXT: &str = r#"# Obsidian Nexus MCP — Available Tools
 ## Graph Navigation
 - **nexus_get_backlinks** — Documents linking TO this document
 - **nexus_get_links** — Documents this document links TO
+- **nexus_get_cluster** — All documents within N hops (forward + backward). Replaces multiple get_links/get_backlinks calls.
+- **nexus_find_path** — Shortest forward-link path between two documents
+- **nexus_find_related** — Related documents via RRF (link + tag + vector signals)
 
 ## Project Management
 - **nexus_list_projects** — List all registered vaults
@@ -243,6 +246,45 @@ fn handle_tools_list(id: &Value) -> Value {
                     }
                 },
                 {
+                    "name": "nexus_get_cluster",
+                    "description": "Get all documents reachable from a document within N hops (forward + backlinks). Returns nodes with distance, tags, and snippet. Replaces multiple get_backlinks/get_links calls.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Project name or ID" },
+                            "path": { "type": "string", "description": "File path relative to vault root" },
+                            "depth": { "type": "integer", "description": "Traversal depth (default: 2, max: 5)", "default": 2 }
+                        },
+                        "required": ["project", "path"]
+                    }
+                },
+                {
+                    "name": "nexus_find_path",
+                    "description": "Find the shortest forward-link path between two documents (max 6 hops). Returns null if no path exists.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Project name or ID" },
+                            "from": { "type": "string", "description": "Source file path" },
+                            "to": { "type": "string", "description": "Target file path" }
+                        },
+                        "required": ["project", "from", "to"]
+                    }
+                },
+                {
+                    "name": "nexus_find_related",
+                    "description": "Find related documents using RRF over link-distance and tag overlap. Returns scored results with signals indicating why each document was included.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Project name or ID" },
+                            "path": { "type": "string", "description": "File path relative to vault root" },
+                            "k": { "type": "integer", "description": "Max results (default: 10)", "default": 10 }
+                        },
+                        "required": ["project", "path"]
+                    }
+                },
+                {
                     "name": "nexus_resolve_alias",
                     "description": "Find a document by its alias",
                     "inputSchema": {
@@ -313,6 +355,9 @@ fn handle_tools_call(id: &Value, params: &Value, pool: &nexus_core::db::sqlite::
         "nexus_get_toc" => tool_get_toc(&args, pool),
         "nexus_get_backlinks" => tool_get_backlinks(&args, pool),
         "nexus_get_links" => tool_get_links(&args, pool),
+        "nexus_get_cluster" => tool_get_cluster(&args, pool),
+        "nexus_find_path" => tool_find_path(&args, pool),
+        "nexus_find_related" => tool_find_related(&args, pool),
         "nexus_resolve_alias" => tool_resolve_alias(&args, pool),
         "nexus_status" => Ok(nexus_core::status::get_status(pool)),
         "nexus_help" => Ok(NEXUS_HELP_TEXT.to_string()),
@@ -481,6 +526,33 @@ fn tool_get_links(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::r
     let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
     let links = nexus_core::search::get_forward_links(pool, &proj.id, path).map_err(|e| e.to_string())?;
     serde_json::to_string_pretty(&links).map_err(|e| e.to_string())
+}
+
+fn tool_get_cluster(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
+    let project = args.get("project").and_then(|p| p.as_str()).ok_or("Missing 'project'")?;
+    let path = args.get("path").and_then(|p| p.as_str()).ok_or("Missing 'path'")?;
+    let depth = args.get("depth").and_then(|d| d.as_i64()).unwrap_or(2).min(5);
+    let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
+    let cluster = nexus_core::search::get_cluster(pool, &proj.id, path, depth).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&cluster).map_err(|e| e.to_string())
+}
+
+fn tool_find_path(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
+    let project = args.get("project").and_then(|p| p.as_str()).ok_or("Missing 'project'")?;
+    let from = args.get("from").and_then(|p| p.as_str()).ok_or("Missing 'from'")?;
+    let to = args.get("to").and_then(|p| p.as_str()).ok_or("Missing 'to'")?;
+    let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
+    let result = nexus_core::search::find_path(pool, &proj.id, from, to).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
+}
+
+fn tool_find_related(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
+    let project = args.get("project").and_then(|p| p.as_str()).ok_or("Missing 'project'")?;
+    let path = args.get("path").and_then(|p| p.as_str()).ok_or("Missing 'path'")?;
+    let k = args.get("k").and_then(|k| k.as_u64()).unwrap_or(10) as usize;
+    let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
+    let related = nexus_core::search::find_related(pool, &proj.id, path, k).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&related).map_err(|e| e.to_string())
 }
 
 fn tool_resolve_alias(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
