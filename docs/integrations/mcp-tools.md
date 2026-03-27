@@ -11,7 +11,7 @@ aliases:
 
 # MCP 도구 레퍼런스
 
-총 13개 도구 제공. AI 에이전트가 문서를 검색, 탐색, 분석하는 데 사용.
+총 16개 MCP 도구 + CLI `graph` 서브커맨드 제공. AI 에이전트가 문서를 검색, 탐색, 분석하는 데 사용.
 
 ## 검색
 
@@ -116,6 +116,12 @@ heading 기반 섹션 부분 읽기. 토큰 절약에 유용.
 | from | string | O |
 | to | string | O |
 
+> [!important] resolve된 링크만 탐색됩니다
+> `wiki_links.target_doc_id`가 NULL인 미해결 링크는 경로 탐색에서 무시됩니다.
+> 위키링크를 `[[표시 이름]]` 대신 `[[architecture/database-schema]]`처럼
+> **파일 경로 기반**으로 작성해야 정상 작동합니다.
+> 사전에 `nexus_get_links`로 `resolved` 필드를 확인하세요.
+
 ### nexus_find_related
 
 링크 거리와 태그 중복을 RRF로 합산하여 유사 문서 상위 k개 반환. signals 필드로 근거 제공.
@@ -208,6 +214,49 @@ nexus_onboard({ "project_path": "/path/to/my-project" })
 ```
 
 생성 후 Claude Code 세션 재시작 필요.
+
+## CLI — graph 서브커맨드
+
+MCP 도구와 동일한 그래프 쿼리를 CLI로도 사용할 수 있다.
+
+### obs-nexus graph related
+
+```bash
+obs-nexus graph related <project> <path> [--k N] [--format text|json]
+```
+
+링크 거리 + 태그 중복 RRF로 관련 문서 추천.
+
+```bash
+obs-nexus graph related "My Vault" "architecture/search-system.md" --k 5 --format text
+# [0.0323] architecture/chunk-scalability.md — 청크 규모 확장 (link, tag)
+```
+
+### obs-nexus graph path
+
+```bash
+obs-nexus graph path <project> <from> <to> [--format text|json]
+```
+
+두 문서 사이 최단 정방향 링크 경로 탐색 (max 6 hops).
+
+```bash
+obs-nexus graph path "My Vault" "devlog/2026-03-23-dashboard.md" "architecture/search-system.md" --format text
+# Path (1 hops): devlog/2026-03-23-dashboard.md → architecture/search-system.md
+```
+
+### obs-nexus graph cluster
+
+```bash
+obs-nexus graph cluster <project> <path> [--depth N] [--format text|json]
+```
+
+N-hop 이내 연결된 모든 문서 반환 (기본 depth=2, 최대 5).
+
+```bash
+obs-nexus graph cluster "My Vault" "architecture/search-system.md" --depth 1 --format text
+# (d=1) architecture/chunk-scalability.md — 청크 규모 확장 [architecture, search]
+```
 
 ## 에이전트 활용 패턴
 

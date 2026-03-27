@@ -93,6 +93,11 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Graph traversal: related documents, shortest path, link cluster
+    Graph {
+        #[command(subcommand)]
+        command: commands::graph::GraphCommands,
+    },
 }
 
 fn main() -> Result<()> {
@@ -140,6 +145,9 @@ fn main() -> Result<()> {
         }
         Commands::Ranking { project, limit } => {
             commands::ranking::handle_ranking(&pool, project.as_deref(), limit, &cli.format)?;
+        }
+        Commands::Graph { command } => {
+            commands::graph::handle(&pool, command, &cli.format)?;
         }
         Commands::Update { .. } => unreachable!(),
     }
