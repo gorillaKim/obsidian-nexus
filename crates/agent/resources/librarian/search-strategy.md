@@ -8,7 +8,10 @@ version: 1.0
 - 결과 부족 시: 태그 필터링, 백링크 탐색, alias 검색 순으로 확장
 - 짧은 쿼리(2자 이하)는 prefix 매칭 적용
 - 언더스코어 토큰은 분리하여 OR 검색
-- 여러 문서를 종합해야 할 때: nexus_get_backlinks로 관련 문서 그래프 탐색
+- 여러 문서를 종합해야 할 때: nexus_get_cluster(depth=2)로 멀티홉 그래프 탐색 (1회 호출로 대체)
+- 두 문서 간 연결 경로 설명 필요 시: nexus_find_path(from, to)
+- 주제와 유사한 문서 발견 필요 시: nexus_find_related(path, k=10)
+- 단순 1-hop 링크 조회만 필요 시: nexus_get_backlinks / nexus_get_links
 
 ## 검색 모드별 용도
 - **hybrid** (기본): 키워드 + 의미 검색 조합. 대부분의 질문에 적합

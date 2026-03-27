@@ -157,8 +157,11 @@ export function GuideView() {
           <Card>
             <h4 className="font-medium text-sm text-[var(--text-primary)] mb-2">그래프 탐색 도구</h4>
             <div className="text-xs space-y-2">
-              <div className="flex gap-2"><CodeInline>nexus_get_backlinks</CodeInline><span className="text-[var(--text-tertiary)]">이 문서를 링크하는 문서들</span></div>
-              <div className="flex gap-2"><CodeInline>nexus_get_links</CodeInline><span className="text-[var(--text-tertiary)]">이 문서가 링크하는 문서들</span></div>
+              <div className="flex gap-2"><CodeInline>nexus_get_backlinks</CodeInline><span className="text-[var(--text-tertiary)]">이 문서를 링크하는 문서들 (1-hop)</span></div>
+              <div className="flex gap-2"><CodeInline>nexus_get_links</CodeInline><span className="text-[var(--text-tertiary)]">이 문서가 링크하는 문서들 (1-hop)</span></div>
+              <div className="flex gap-2"><CodeInline>nexus_get_cluster</CodeInline><span className="text-[var(--text-tertiary)]">멀티홉 그래프 탐색 (depth 파라미터, 앞+뒤)</span></div>
+              <div className="flex gap-2"><CodeInline>nexus_find_path</CodeInline><span className="text-[var(--text-tertiary)]">두 문서 간 최단 링크 경로</span></div>
+              <div className="flex gap-2"><CodeInline>nexus_find_related</CodeInline><span className="text-[var(--text-tertiary)]">링크+태그 기반 유사 문서 추천</span></div>
             </div>
           </Card>
           <Card>
@@ -181,7 +184,7 @@ export function GuideView() {
           <p>1. 데스크톱 앱으로 Obsidian 볼트 등록 & 인덱싱</p>
           <p>2. <CodeInline>nexus onboard</CodeInline>로 프로젝트에 MCP 연동 설정</p>
           <p>3. AI 에이전트가 <CodeInline>nexus_search</CodeInline> → <CodeInline>nexus_get_section</CodeInline>으로 필요한 문서만 가져옴</p>
-          <p>4. <CodeInline>nexus_get_backlinks</CodeInline>로 관련 문서 탐색</p>
+          <p>4. <CodeInline>nexus_get_cluster</CodeInline>로 멀티홉 관련 문서 탐색</p>
         </div>
       </Card>
     </div>

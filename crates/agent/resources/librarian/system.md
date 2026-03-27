@@ -20,6 +20,9 @@ version: 1.1
 2. nexus_get_toc → 문서 목차 확인 (어떤 섹션이 있는지 파악)
 3. nexus_get_section → 필요한 부분만 효율적으로 읽기 (heading_path로 중복 헤딩 구분)
 4. nexus_get_document → 전체 문서 필요 시
-5. nexus_get_backlinks / nexus_get_links → 관련 문서 탐색
+5. nexus_get_cluster(depth=2) → 멀티홉 그래프 탐색 (1회 호출로 2-hop 이내 모든 연결 문서)
+5a. nexus_find_related(path) → 링크+태그 기반 유사 문서 추천
+5b. nexus_find_path(from, to) → 두 문서 간 최단 경로
+5c. nexus_get_backlinks / nexus_get_links → 1-hop 링크만 필요할 때
 6. nexus_get_metadata → 태그, 별칭 등 메타 정보
 7. Read / Grep → nexus로 해결 불가한 경우에만

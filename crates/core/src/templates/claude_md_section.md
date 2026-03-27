@@ -11,14 +11,17 @@
 | 전체 문서 읽기 | `nexus_get_document` |
 | 특정 섹션만 | `nexus_get_section` (토큰 90% 절약) |
 | 별칭으로 문서 찾기 | `nexus_resolve_alias` |
-| 역방향 링크 탐색 | `nexus_get_backlinks` |
-| 정방향 링크 탐색 | `nexus_get_links` |
+| 역방향 링크 탐색 (1-hop) | `nexus_get_backlinks` |
+| 정방향 링크 탐색 (1-hop) | `nexus_get_links` |
+| 멀티홉 그래프 탐색 | `nexus_get_cluster` (depth 파라미터, 앞+뒤 방향) |
+| 유사 문서 추천 | `nexus_find_related` (링크+태그 RRF) |
+| 두 문서 간 경로 | `nexus_find_path` |
 
 ### 검색 전략
 
 1. `nexus_search(query, mode="hybrid")` → 자연어 검색
 2. `nexus_get_section(path, heading)` → 필요한 섹션만 읽기
-3. `nexus_get_backlinks` → 관련 문서 추가 탐색
+3. `nexus_get_cluster(path, depth=2)` → 멀티홉 관련 문서 탐색
 
 ### 폴백 규칙
 
