@@ -704,3 +704,125 @@ fn test_get_toc_nonexistent_document() {
     let result = search::get_toc(&pool, &proj.id, "nonexistent.md");
     assert!(result.is_err(), "Should return error for nonexistent document");
 }
+
+// ── Graph query tests ──────────────────────────────────────────────────────
+
+fn setup_graph_project(pool: &DbPool) -> (nexus_core::project::Project, TempDir) {
+    let vault = TempDir::new().unwrap();
+    fs::write(vault.path().join("a.md"), "# A\nRoot document.").unwrap();
+    fs::write(vault.path().join("b.md"), "# B\nMiddle document.").unwrap();
+    fs::write(vault.path().join("c.md"), "# C\nLeaf document.").unwrap();
+    fs::write(vault.path().join("d.md"), "# D\nBranch document.").unwrap();
+
+    let proj = project::add_project(pool, "graph-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(pool, &proj.id, false).unwrap();
+
+    // Build link chain: a → b → c, b → d
+    let conn = pool.get().unwrap();
+    let a_id: String = conn.query_row("SELECT id FROM documents WHERE file_path='a.md' AND project_id=?1", [&proj.id], |r| r.get(0)).unwrap();
+    let b_id: String = conn.query_row("SELECT id FROM documents WHERE file_path='b.md' AND project_id=?1", [&proj.id], |r| r.get(0)).unwrap();
+    let c_id: String = conn.query_row("SELECT id FROM documents WHERE file_path='c.md' AND project_id=?1", [&proj.id], |r| r.get(0)).unwrap();
+    let d_id: String = conn.query_row("SELECT id FROM documents WHERE file_path='d.md' AND project_id=?1", [&proj.id], |r| r.get(0)).unwrap();
+    conn.execute("INSERT INTO wiki_links (source_doc_id, target_path, target_doc_id) VALUES (?1,'b.md',?2)", [&a_id, &b_id]).unwrap();
+    conn.execute("INSERT INTO wiki_links (source_doc_id, target_path, target_doc_id) VALUES (?1,'c.md',?2)", [&b_id, &c_id]).unwrap();
+    conn.execute("INSERT INTO wiki_links (source_doc_id, target_path, target_doc_id) VALUES (?1,'d.md',?2)", [&b_id, &d_id]).unwrap();
+    drop(conn);
+
+    (proj, vault)
+}
+
+#[test]
+fn test_get_cluster_depth1() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_graph_project(&pool);
+
+    let cluster = search::get_cluster(&pool, &proj.id, "a.md", 1).unwrap();
+    let paths: Vec<_> = cluster.iter().map(|n| n.file_path.as_str()).collect();
+
+    assert!(paths.contains(&"b.md"), "depth-1 cluster from a.md must include b.md");
+    assert!(!paths.contains(&"c.md"), "depth-1 cluster from a.md must NOT include c.md");
+    assert!(!paths.contains(&"a.md"), "cluster must not include the source document itself");
+}
+
+#[test]
+fn test_get_cluster_depth2() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_graph_project(&pool);
+
+    let cluster = search::get_cluster(&pool, &proj.id, "a.md", 2).unwrap();
+    let paths: Vec<_> = cluster.iter().map(|n| n.file_path.as_str()).collect();
+
+    assert!(paths.contains(&"b.md"), "depth-2 must include b.md");
+    assert!(paths.contains(&"c.md"), "depth-2 must include c.md");
+    assert!(paths.contains(&"d.md"), "depth-2 must include d.md");
+}
+
+#[test]
+fn test_get_cluster_includes_backlinks() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_graph_project(&pool);
+
+    // b.md has a backlink from a.md — when starting at c.md, depth=2 should reach a.md via backlinks
+    let cluster = search::get_cluster(&pool, &proj.id, "c.md", 2).unwrap();
+    let paths: Vec<_> = cluster.iter().map(|n| n.file_path.as_str()).collect();
+
+    assert!(paths.contains(&"b.md"), "backlink traversal: c←b must be reachable");
+    assert!(paths.contains(&"a.md"), "backlink traversal: c←b←a must be reachable at depth 2");
+}
+
+#[test]
+fn test_find_path_direct() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_graph_project(&pool);
+
+    let result = search::find_path(&pool, &proj.id, "a.md", "b.md").unwrap();
+    assert!(result.is_some(), "Direct path a→b must exist");
+    let p = result.unwrap();
+    assert_eq!(p.hops, 1);
+    assert_eq!(p.path, vec!["a.md", "b.md"]);
+}
+
+#[test]
+fn test_find_path_two_hops() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_graph_project(&pool);
+
+    let result = search::find_path(&pool, &proj.id, "a.md", "c.md").unwrap();
+    assert!(result.is_some(), "2-hop path a→b→c must exist");
+    let p = result.unwrap();
+    assert_eq!(p.hops, 2);
+}
+
+#[test]
+fn test_find_path_no_path() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_graph_project(&pool);
+
+    // No forward link from c.md to anything
+    let result = search::find_path(&pool, &proj.id, "c.md", "a.md").unwrap();
+    assert!(result.is_none(), "No forward path from c to a (only backlinks)");
+}
+
+#[test]
+fn test_find_related_returns_linked_docs() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_graph_project(&pool);
+
+    let related = search::find_related(&pool, &proj.id, "a.md", 5).unwrap();
+    let paths: Vec<_> = related.iter().map(|r| r.file_path.as_str()).collect();
+
+    assert!(!paths.is_empty(), "find_related must return results");
+    assert!(paths.contains(&"b.md"), "b.md (directly linked) must be in related");
+    assert!(!paths.contains(&"a.md"), "source doc must not be in related");
+}
+
+#[test]
+fn test_find_related_signals_populated() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_graph_project(&pool);
+
+    let related = search::find_related(&pool, &proj.id, "a.md", 5).unwrap();
+    for r in &related {
+        assert!(!r.signals.is_empty(), "every related result must have at least one signal");
+    }
+}

@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::db::sqlite::DbPool;
@@ -924,6 +924,247 @@ pub fn get_forward_links(pool: &DbPool, project_id: &str, file_path: &str) -> Re
             resolved: target_doc_id.is_some(),
         })
     })?.collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(results)
+}
+
+// ── Graph query types & functions ─────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClusterNode {
+    pub file_path: String,
+    pub title: Option<String>,
+    pub distance: i64,
+    pub tags: Vec<String>,
+    pub snippet: Option<String>,
+}
+
+/// Get all documents reachable from `file_path` within `depth` hops (forward + backward links).
+pub fn get_cluster(pool: &DbPool, project_id: &str, file_path: &str, depth: i64) -> Result<Vec<ClusterNode>> {
+    let depth = depth.min(5);
+    let conn = pool.get()?;
+    let mut stmt = conn.prepare(
+        "WITH RECURSIVE cluster(doc_id, hops) AS (
+            SELECT d.id, 0 FROM documents d
+            WHERE d.project_id = ?1 AND d.file_path = ?2
+
+            UNION
+
+            SELECT wl.target_doc_id, c.hops + 1
+            FROM wiki_links wl
+            JOIN cluster c ON wl.source_doc_id = c.doc_id
+            WHERE c.hops < ?3 AND wl.target_doc_id IS NOT NULL
+
+            UNION
+
+            SELECT wl.source_doc_id, c.hops + 1
+            FROM wiki_links wl
+            JOIN cluster c ON wl.target_doc_id = c.doc_id
+            WHERE c.hops < ?3
+        )
+        SELECT d.file_path, d.title, MIN(c.hops) as distance,
+               (SELECT GROUP_CONCAT(t.name, ',')
+                FROM document_tags dt JOIN tags t ON dt.tag_id = t.id
+                WHERE dt.document_id = d.id) as tags,
+               (SELECT ch.content FROM chunks ch WHERE ch.document_id = d.id LIMIT 1) as snippet
+        FROM cluster c
+        JOIN documents d ON c.doc_id = d.id
+        WHERE d.file_path != ?2
+        GROUP BY d.id
+        ORDER BY distance, d.file_path"
+    )?;
+    let results = stmt.query_map(params![project_id, file_path, depth], |row| {
+        let tags_str: Option<String> = row.get(3)?;
+        Ok(ClusterNode {
+            file_path: row.get(0)?,
+            title: row.get(1)?,
+            distance: row.get(2)?,
+            tags: tags_str.map(|s| s.split(',').map(String::from).collect()).unwrap_or_default(),
+            snippet: row.get(4)?,
+        })
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(results)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PathResult {
+    pub path: Vec<String>,
+    pub hops: i64,
+}
+
+/// Find the shortest forward-link path between two documents (max 6 hops).
+/// Uses BFS in Rust with a visited set to prevent cycles.
+pub fn find_path(pool: &DbPool, project_id: &str, from: &str, to: &str) -> Result<Option<PathResult>> {
+    use std::collections::{HashSet, VecDeque};
+
+    // Resolve start and end doc IDs
+    let conn = pool.get()?;
+    let from_id: Option<String> = conn.query_row(
+        "SELECT id FROM documents WHERE project_id = ?1 AND file_path = ?2",
+        params![project_id, from],
+        |r| r.get(0),
+    ).optional()?;
+    let to_id: Option<String> = conn.query_row(
+        "SELECT id FROM documents WHERE project_id = ?1 AND file_path = ?2",
+        params![project_id, to],
+        |r| r.get(0),
+    ).optional()?;
+
+    let (from_id, to_id) = match (from_id, to_id) {
+        (Some(f), Some(t)) => (f, t),
+        _ => return Ok(None),
+    };
+
+    if from_id == to_id {
+        return Ok(Some(PathResult { path: vec![from.to_string()], hops: 0 }));
+    }
+
+    // BFS: queue holds (doc_id, path_so_far)
+    let mut queue: VecDeque<(String, Vec<String>)> = VecDeque::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    queue.push_back((from_id.clone(), vec![from.to_string()]));
+    visited.insert(from_id);
+
+    let mut neighbour_stmt = conn.prepare_cached(
+        "SELECT wl.target_doc_id, d.file_path
+         FROM wiki_links wl
+         JOIN documents d ON wl.target_doc_id = d.id
+         WHERE wl.source_doc_id = ?1 AND wl.target_doc_id IS NOT NULL"
+    )?;
+
+    while let Some((cur_id, cur_path)) = queue.pop_front() {
+        if cur_path.len() > 6 {
+            break;
+        }
+        let neighbours: Vec<(String, String)> = neighbour_stmt.query_map(params![cur_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+
+        for (nid, npath) in neighbours {
+            if visited.contains(&nid) {
+                continue;
+            }
+            let mut new_path = cur_path.clone();
+            new_path.push(npath);
+            if nid == to_id {
+                let hops = (new_path.len() - 1) as i64;
+                return Ok(Some(PathResult { path: new_path, hops }));
+            }
+            visited.insert(nid.clone());
+            queue.push_back((nid, new_path));
+        }
+    }
+    Ok(None)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RelatedResult {
+    pub file_path: String,
+    pub title: Option<String>,
+    pub score: f64,
+    pub signals: Vec<String>,
+}
+
+/// Find related documents using RRF over link-distance and tag overlap.
+pub fn find_related(pool: &DbPool, project_id: &str, file_path: &str, k: usize) -> Result<Vec<RelatedResult>> {
+    // 1. Link signal: get cluster depth=2
+    let cluster = get_cluster(pool, project_id, file_path, 2)?;
+
+    // 2. Tag signal: get source doc tags
+    let source_tags = {
+        let conn = pool.get()?;
+        let tags_str: Option<String> = conn.query_row(
+            "SELECT GROUP_CONCAT(t.name, ',')
+             FROM document_tags dt JOIN tags t ON dt.tag_id = t.id
+             JOIN documents d ON dt.document_id = d.id
+             WHERE d.project_id = ?1 AND d.file_path = ?2",
+            params![project_id, file_path],
+            |row| row.get(0),
+        ).optional()?.flatten();
+        tags_str.map(|s| s.split(',').map(String::from).collect::<Vec<_>>()).unwrap_or_default()
+    };
+
+    // 3. Tag-overlap candidates (all docs in project with shared tags)
+    let tag_candidates: Vec<(String, i64)> = if !source_tags.is_empty() {
+        let conn = pool.get()?;
+        let placeholders = source_tags.iter().enumerate().map(|(i, _)| format!("?{}", i + 3)).collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT d.file_path, COUNT(*) as overlap
+             FROM document_tags dt
+             JOIN tags t ON dt.tag_id = t.id
+             JOIN documents d ON dt.document_id = d.id
+             WHERE d.project_id = ?1 AND d.file_path != ?2
+               AND t.name IN ({placeholders})
+             GROUP BY d.id ORDER BY overlap DESC LIMIT 50"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = vec![
+            Box::new(project_id.to_string()),
+            Box::new(file_path.to_string()),
+        ];
+        for tag in &source_tags {
+            param_values.push(Box::new(tag.clone()));
+        }
+        let params_refs: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+        let collected = stmt.query_map(params_refs.as_slice(), |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        collected
+    } else {
+        vec![]
+    };
+
+    // 4. Collect all candidate file paths
+    use std::collections::HashMap;
+    let mut scores: HashMap<String, (f64, Vec<String>)> = HashMap::new();
+
+    // Link ranks (RRF k=60)
+    for (rank, node) in cluster.iter().enumerate() {
+        let entry = scores.entry(node.file_path.clone()).or_insert((0.0, vec![]));
+        entry.0 += 1.0 / (60.0 + rank as f64 + 1.0);
+        if !entry.1.contains(&"link".to_string()) {
+            entry.1.push("link".to_string());
+        }
+    }
+
+    // Tag ranks
+    for (rank, (path, _)) in tag_candidates.iter().enumerate() {
+        let entry = scores.entry(path.clone()).or_insert((0.0, vec![]));
+        entry.0 += 1.0 / (60.0 + rank as f64 + 1.0);
+        if !entry.1.contains(&"tag".to_string()) {
+            entry.1.push("tag".to_string());
+        }
+    }
+
+    // Fetch titles in a single batch query
+    let conn = pool.get()?;
+    let candidates: Vec<(String, f64, Vec<String>)> = scores
+        .into_iter()
+        .map(|(fp, (score, signals))| (fp, score, signals))
+        .collect();
+    let placeholders = candidates.iter().enumerate()
+        .map(|(i, _)| format!("?{}", i + 2))
+        .collect::<Vec<_>>().join(",");
+    let title_sql = format!(
+        "SELECT file_path, title FROM documents WHERE project_id = ?1 AND file_path IN ({placeholders})"
+    );
+    let mut title_stmt = conn.prepare(&title_sql)?;
+    let mut title_params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(project_id.to_string())];
+    for (fp, _, _) in &candidates {
+        title_params.push(Box::new(fp.clone()));
+    }
+    let title_refs: Vec<&dyn rusqlite::ToSql> = title_params.iter().map(|b| b.as_ref()).collect();
+    let title_map: std::collections::HashMap<String, Option<String>> = {
+        let rows = title_stmt.query_map(title_refs.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        rows.into_iter().collect()
+    };
+    let mut results: Vec<RelatedResult> = candidates.into_iter().map(|(fp, score, signals)| {
+        let title = title_map.get(&fp).cloned().flatten();
+        RelatedResult { file_path: fp, title, score, signals }
+    }).collect();
+
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.truncate(k);
     Ok(results)
 }
 
