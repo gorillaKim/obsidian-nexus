@@ -342,8 +342,11 @@ obs-nexus update --force      # 캐시 무시하고 강제 확인
 | `nexus_get_section` | 특정 섹션만 추출 (토큰 절약) |
 | `nexus_resolve_alias` | 별칭으로 문서 찾기 |
 | `nexus_get_metadata` | 태그, frontmatter 조회 |
-| `nexus_get_backlinks` | 역방향 링크 탐색 |
-| `nexus_get_links` | 정방향 링크 탐색 |
+| `nexus_get_backlinks` | 역방향 링크 탐색 (1-hop) |
+| `nexus_get_links` | 정방향 링크 탐색 (1-hop) |
+| `nexus_get_cluster` | 멀티홉 그래프 탐색 (앞+뒤 방향, depth 파라미터) |
+| `nexus_find_path` | 두 문서 간 최단 경로 탐색 |
+| `nexus_find_related` | 링크+태그 기반 유사 문서 추천 |
 | `nexus_list_projects` | 등록된 볼트 목록 |
 | `nexus_list_documents` | 볼트 내 문서 목록 |
 | `nexus_index_project` | 인덱싱 트리거 |

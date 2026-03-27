@@ -96,6 +96,36 @@ heading 기반 섹션 부분 읽기. 토큰 절약에 유용.
 | project | string | O |
 | path | string | O |
 
+### nexus_get_cluster
+
+앞방향+역방향 링크를 따라 depth 홉 이내 연결된 모든 문서 반환. tags, snippet 포함.
+
+| 파라미터 | 타입 | 필수 | 기본값 |
+|----------|------|------|--------|
+| project | string | O | |
+| path | string | O | |
+| depth | integer | - | 2 (max 5) |
+
+### nexus_find_path
+
+두 문서 사이 최단 정방향 링크 경로 탐색 (max 6 hops). 경로 없으면 null 반환.
+
+| 파라미터 | 타입 | 필수 |
+|----------|------|------|
+| project | string | O |
+| from | string | O |
+| to | string | O |
+
+### nexus_find_related
+
+링크 거리와 태그 중복을 RRF로 합산하여 유사 문서 상위 k개 반환. signals 필드로 근거 제공.
+
+| 파라미터 | 타입 | 필수 | 기본값 |
+|----------|------|------|--------|
+| project | string | O | |
+| path | string | O | |
+| k | integer | - | 10 |
+
 ### nexus_resolve_alias
 
 별칭으로 문서 찾기.
@@ -187,7 +217,7 @@ nexus_onboard({ "project_path": "/path/to/my-project" })
 2. nexus_list_projects → 볼트 파악
 3. nexus_search("키워드") → 관련 문서 검색
 4. nexus_get_section(path, heading) → 필요한 섹션만 읽기
-5. nexus_get_backlinks(path) → 관련 문서 그래프 탐색
+5. nexus_get_cluster(path, depth=2) → 멀티홉 그래프 탐색 (2-hop 이내 모든 연결 문서)
 6. nexus_resolve_alias("별칭") → 별칭으로 문서 접근
 7. nexus_sync_config(project) → on-config.json 변경 후 동기화
 ```
