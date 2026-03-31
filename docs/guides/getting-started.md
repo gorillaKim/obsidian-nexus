@@ -211,20 +211,21 @@ MCP 서버 바이너리 경로는 `which nexus-mcp-server`로 확인하세요.
 nexus watch <프로젝트명>
 ```
 
-백그라운드 서비스로 등록하려면 [[05-설정-가이드]]를 참조하세요.
+백그라운드 서비스로 등록하려면 [[configuration|설정 가이드]]를 참조하세요.
 
 ---
 
 ## 다음 단계
 
-- [[03-MCP-도구-레퍼런스]] — Claude에서 사용 가능한 MCP 도구 전체 목록
-- [[05-설정-가이드]] — 임베딩 모델, 검색 가중치, 인덱서 세부 설정
-- [[08-서브에이전트-MCP-설정-가이드]] — Claude Code 서브에이전트에서 Nexus 도구 사용
-- [[02-검색-시스템]] — 검색 모드(keyword/vector/hybrid) 상세 설명
+- [[mcp-tools|MCP 도구 레퍼런스]] — Claude에서 사용 가능한 MCP 도구 전체 목록
+- [[configuration|설정 가이드]] — 임베딩 모델, 검색 가중치, 인덱서 세부 설정
+- [[subagent-mcp-setup|서브에이전트 MCP 설정 가이드]] — Claude Code 서브에이전트에서 Nexus 도구 사용
+- [[search-system|검색 시스템]] — 검색 모드(keyword/vector/hybrid) 상세 설명
 
 ## 관련 문서
 
-- [[05-설정-가이드]]
-- [[03-MCP-도구-레퍼런스]]
-- [[08-서브에이전트-MCP-설정-가이드]]
-- [[02-검색-시스템]]
+- [[project-overview|프로젝트 개요]]
+- [[configuration|설정 가이드]]
+- [[mcp-tools|MCP 도구 레퍼런스]]
+- [[subagent-mcp-setup|서브에이전트 MCP 설정 가이드]]
+- [[search-system|검색 시스템]]

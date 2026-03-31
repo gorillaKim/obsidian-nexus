@@ -58,10 +58,11 @@ obsidian-nexus/
 
 ## 관련 문서
 
-- [[01-아키텍처]]
-- [[02-검색-시스템]]
-- [[03-MCP-도구-레퍼런스]]
-- [[04-데이터베이스-스키마]]
-- [[05-설정-가이드]]
-- [[06-개발-가이드]]
-- [[08-서브에이전트-MCP-설정-가이드]]
+- [[architecture|아키텍처]]
+- [[search-system|검색 시스템]]
+- [[mcp-tools|MCP 도구 레퍼런스]]
+- [[database-schema|데이터베이스 스키마]]
+- [[configuration|설정 가이드]]
+- [[development|개발 가이드]]
+- [[subagent-mcp-setup|서브에이전트 MCP 설정 가이드]]
+- [[getting-started|시작하기]]
