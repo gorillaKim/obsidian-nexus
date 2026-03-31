@@ -76,10 +76,31 @@ success "체크섬 검증 완료"
 mkdir -p "$INSTALL_DIR"
 tar xzf "${TMP_DIR}/${TARBALL}" -C "$TMP_DIR"
 
+APP_MACOS_DIR="/Applications/Obsidian Nexus.app/Contents/MacOS"
+
 for BIN in obs-nexus nexus-mcp-server; do
   if [[ -f "${TMP_DIR}/${BIN}" ]]; then
-    install -m 755 "${TMP_DIR}/${BIN}" "${INSTALL_DIR}/${BIN}"
-    success "${BIN} → ${INSTALL_DIR}/${BIN}"
+    # If the desktop app is installed, compare versions and use the newer one
+    if [[ -x "${APP_MACOS_DIR}/${BIN}" ]]; then
+      DOWNLOADED_VER=$("${TMP_DIR}/${BIN}" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+      APP_VER=$("${APP_MACOS_DIR}/${BIN}" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+
+      # Compare using sort -V; if downloaded is strictly newer, install directly
+      if [[ -n "$DOWNLOADED_VER" && -n "$APP_VER" ]] && \
+         [[ "$DOWNLOADED_VER" != "$APP_VER" ]] && \
+         [[ "$DOWNLOADED_VER" = "$(printf '%s\n%s' "$DOWNLOADED_VER" "$APP_VER" | sort -V | tail -1)" ]]; then
+        warn "${BIN}: 다운로드 버전(${DOWNLOADED_VER}) > 앱 번들 버전(${APP_VER}) — 직접 설치"
+        install -m 755 "${TMP_DIR}/${BIN}" "${INSTALL_DIR}/${BIN}"
+        success "${BIN} → ${INSTALL_DIR}/${BIN}"
+      else
+        rm -f "${INSTALL_DIR}/${BIN}"
+        ln -s "${APP_MACOS_DIR}/${BIN}" "${INSTALL_DIR}/${BIN}"
+        success "${BIN} → ${INSTALL_DIR}/${BIN} (symlink to app bundle)"
+      fi
+    else
+      install -m 755 "${TMP_DIR}/${BIN}" "${INSTALL_DIR}/${BIN}"
+      success "${BIN} → ${INSTALL_DIR}/${BIN}"
+    fi
   else
     warn "${BIN} 바이너리를 찾을 수 없습니다."
   fi

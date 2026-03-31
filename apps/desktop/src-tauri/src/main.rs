@@ -647,13 +647,18 @@ fn install_cli_symlinks() {
     for name in &["obs-nexus", "nexus-mcp-server"] {
         if let Some(sidecar_path) = find_sidecar(name) {
             let link_path = bin_dir.join(name);
-            // Skip if already pointing to the correct target
+            // Skip if already a symlink pointing to the correct target
             if link_path.is_symlink() {
                 if let Ok(target) = std::fs::read_link(&link_path) {
                     if target.to_string_lossy() == sidecar_path {
                         continue;
                     }
                 }
+                let _ = std::fs::remove_file(&link_path);
+            } else if link_path.exists() {
+                // Regular file exists (e.g. from install.sh or `nexus update`)
+                // Replace with symlink so future app updates propagate automatically
+                eprintln!("Replacing copy with symlink: {}", link_path.display());
                 let _ = std::fs::remove_file(&link_path);
             }
             if !link_path.exists() {
