@@ -14,15 +14,17 @@ export function useSearch() {
   const [minVectorScore, setMinVectorScore] = useState(0.65);
   const [, startTransition] = useTransition();
 
-  const handleSearch = async () => {
-    if (!query.trim()) return;
+  const handleSearch = async (tagOverride?: string) => {
+    const effectiveQuery = query.trim() || (tagOverride ?? tagFilter).trim();
+    if (!effectiveQuery) return;
     setSearching(true);
     try {
-      const parsedTags = tagFilter.trim()
-        ? tagFilter.split(",").map((t) => t.trim()).filter((t) => t)
+      const effectiveTag = tagOverride !== undefined ? tagOverride : tagFilter;
+      const parsedTags = effectiveTag.trim()
+        ? effectiveTag.split(",").map((t) => t.trim()).filter((t) => t)
         : undefined;
       const res = await invoke<SearchResult[]>("search_documents", {
-        query,
+        query: effectiveQuery,
         projectId: selectedProject || null,
         limit: 20,
         mode: searchMode,

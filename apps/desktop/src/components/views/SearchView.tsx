@@ -1,5 +1,9 @@
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useMemo } from "react";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { FrontmatterCard } from "../FrontmatterCard";
 import {
   Search, Settings2, ChevronDown, ChevronRight,
   FolderOpen, FileText, ExternalLink, X, RefreshCw,
@@ -32,7 +36,7 @@ interface SearchViewProps {
   setHybridWeight: (w: number) => void;
   minVectorScore: number;
   setMinVectorScore: (s: number) => void;
-  handleSearch: () => void;
+  handleSearch: (tagOverride?: string) => void;
   resetSettings: () => void;
   // Projects
   projects: Project[];
@@ -53,6 +57,44 @@ interface SearchViewProps {
   buildTree: (docs: DocItem[]) => TreeData;
   isRefreshing: boolean;
   refreshAllProjects: () => Promise<void>;
+}
+
+function parseFrontmatter(content: string): { data: Record<string, unknown>; content: string } {
+  const trimmed = content.trimStart();
+  if (!trimmed.startsWith("---")) return { data: {}, content };
+  const rest = trimmed.slice(3);
+  const end = rest.indexOf("\n---");
+  if (end === -1) return { data: {}, content };
+  const yamlBlock = rest.slice(0, end);
+  const body = rest.slice(end + 4);
+  const data: Record<string, unknown> = {};
+  const lines = yamlBlock.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const sep = line.indexOf(":");
+    if (sep === -1) { i++; continue; }
+    const key = line.slice(0, sep).trim();
+    const val = line.slice(sep + 1).trim();
+    if (val === "" || val === "|" || val === ">") {
+      // block scalar or list — collect indented lines
+      const items: string[] = [];
+      i++;
+      while (i < lines.length && (lines[i].startsWith("  ") || lines[i].startsWith("\t"))) {
+        const item = lines[i].trim();
+        items.push(item.startsWith("- ") ? item.slice(2) : item);
+        i++;
+      }
+      data[key] = items;
+    } else if (val.startsWith("[") && val.endsWith("]")) {
+      data[key] = val.slice(1, -1).split(",").map(s => s.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean);
+      i++;
+    } else {
+      data[key] = val.replace(/^['"]|['"]$/g, "");
+      i++;
+    }
+  }
+  return { data, content: body };
 }
 
 const modeLabels: Record<SearchMode, string> = {
@@ -143,6 +185,11 @@ export function SearchView(props: SearchViewProps) {
     isRefreshing, refreshAllProjects,
   } = props;
 
+  const { data: frontmatter, content: docBody } = useMemo(() => {
+    if (!viewingDoc) return { data: {} as Record<string, unknown>, content: "" };
+    return parseFrontmatter(viewingDoc.content);
+  }, [viewingDoc?.content]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Search bar + filters */}
@@ -156,7 +203,7 @@ export function SearchView(props: SearchViewProps) {
             placeholder="문서를 검색하세요..."
             className="flex-1"
           />
-          <Button variant="primary" size="md" onClick={handleSearch} disabled={searching}>
+          <Button variant="primary" size="md" onClick={() => handleSearch()} disabled={searching}>
             {searching ? "검색 중..." : "검색"}
           </Button>
           <IconButton active={showSettings} onClick={() => setShowSettings(!showSettings)}>
@@ -418,8 +465,33 @@ export function SearchView(props: SearchViewProps) {
                   </Button>
                 </div>
               </div>
-              <div className="prose prose-invert max-w-none text-sm text-[var(--text-primary)]">
-                <Markdown remarkPlugins={[remarkGfm]}>{viewingDoc.content}</Markdown>
+              <div className="prose prose-sm max-w-none">
+                <FrontmatterCard
+                  data={frontmatter}
+                  onTagClick={(tag) => { setTagFilter(tag); handleSearch(tag); }}
+                />
+                <Markdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    code({ className, children, ...props }) {
+                      const match = /language-(\w+)/.exec(className || "");
+                      const isBlock = !("inline" in props && props.inline) && match;
+                      return isBlock ? (
+                        <SyntaxHighlighter
+                          style={oneDark}
+                          language={match[1]}
+                          PreTag="div"
+                        >
+                          {String(children).replace(/\n$/, "")}
+                        </SyntaxHighlighter>
+                      ) : (
+                        <code className={className} {...props}>{children}</code>
+                      );
+                    },
+                  }}
+                >
+                  {docBody}
+                </Markdown>
               </div>
             </div>
           ) : (

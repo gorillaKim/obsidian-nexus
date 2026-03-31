@@ -46,6 +46,21 @@ cargo test -p nexus-core --lib indexer::tests::test_extract_wiki_links
 
 테스트는 인메모리 SQLite를 사용. `test_pool()`이 모든 마이그레이션(V1~V5) + sqlite-vec 확장을 자동 적용.
 
+## 프론트엔드 테스트 (vitest)
+
+```bash
+# 전체 프론트엔드 테스트
+cd apps/desktop && npx vitest run
+
+# 특정 컴포넌트 테스트
+npx vitest run src/components/FrontmatterCard.test.tsx
+```
+
+- 테스트 환경: jsdom
+- 설정: `apps/desktop/vite.config.ts` (`test.environment`, `test.globals`)
+- 셋업: `apps/desktop/src/test-setup.ts` (`@testing-library/jest-dom` 임포트)
+- 테스트 파일은 `tsconfig.json`의 `exclude`에 포함되어 프로덕션 빌드에서 제외됨
+
 ## MCP 서버 테스트
 
 ```bash
