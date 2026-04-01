@@ -15,7 +15,7 @@ tags:
   - tdd
   - bugfix
 created: "2026-04-01"
-updated: "2026-04-01T05:30:00"
+updated: "2026-04-01T07:00:00"
 ---
 
 <!-- docsmith: auto-generated 2026-04-01 -->
@@ -220,3 +220,35 @@ obs-nexus doc sections my-proj docs/guide.md \
 
 - 통합 테스트 **42/42 통과** (get_sections 4개 포함)
 - CLI, MCP 서버, 데스크톱 앱 빌드 전부 성공
+
+## 2026-04-01 (4차)
+
+### 1. 채팅 UI 마크다운 렌더링 개선 (`apps/desktop/src/components/layout/ChatPanel.tsx`)
+
+**배경:** 문서 프리뷰(`SearchView.tsx`)는 `react-syntax-highlighter` + `prose prose-sm`으로 예쁘게 렌더링되지만 채팅 UI는 커스텀 인라인 스타일만 사용해 구문 강조가 없었음. 동일 패키지가 이미 설치되어 있어 추가 의존성 불필요.
+
+**변경 내용:**
+- `import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"` 추가
+- `CodeBlock` 내부 `<pre><code>` → `SyntaxHighlighter` (oneDark 테마, `fontSize: 0.75rem`)
+- 어시스턴트 메시지 래퍼: `prose-chat` → `prose prose-sm prose-invert max-w-none prose-pre:p-0 prose-pre:bg-transparent [&>*:last-child]:mb-0`
+- h1~h3, p, ul, ol, li 커스텀 컴포넌트 제거 (prose가 담당)
+- table, blockquote, a, strong, hr 커스텀 컴포넌트 유지 (CSS 변수 테마 컬러)
+
+**설계 결정 (Gemini CCG 리뷰 반영):**
+- `prose-invert` 고정 — 앱이 다크 전용 (`index.css`에 CSS 변수 고정 확인)
+- `prose-pre:p-0 prose-pre:bg-transparent` — SyntaxHighlighter와 충돌 방지
+- `[&>*:last-child]:mb-0` — 버블 하단 여백 방지
+- 사용자 메시지는 prose 미적용 (짧은 텍스트, 불필요한 여백 방지)
+
+### 2. v0.5.11 릴리즈
+
+- `Cargo.toml`, `apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json` 버전 bump (0.5.10 → 0.5.11)
+- aarch64 릴리즈 빌드 → 사이드카 교체 → Tauri 앱 빌드
+- `git tag v0.5.11` + `git push origin master v0.5.11`
+- GitHub 릴리즈 생성 + DMG/tar.gz/sig 아티팩트 업로드
+
+**릴리즈 내용:** nexus_get_sections, 채팅 UI 마크다운 개선, CLI 태그 필터 패리티, last_modified 버그 수정, frontmatter 날짜 자동 교정
+
+---
+
+최종 상태: v0.5.11 릴리즈 완료, [gorillaKim/obsidian-nexus/releases/tag/v0.5.11](https://github.com/gorillaKim/obsidian-nexus/releases/tag/v0.5.11)
