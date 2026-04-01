@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import {
   X,
   MessageSquare,
@@ -51,9 +53,14 @@ function CodeBlock({ children, className, onCopy }: { children?: React.ReactNode
           {copied ? "복사됨" : "복사"}
         </button>
       </div>
-      <pre className="px-3 py-2.5 overflow-x-auto bg-[var(--bg-primary)]">
-        <code className="text-xs font-mono text-[var(--text-primary)] whitespace-pre">{text}</code>
-      </pre>
+      <SyntaxHighlighter
+        style={oneDark}
+        language={lang}
+        PreTag="div"
+        customStyle={{ margin: 0, borderRadius: 0, fontSize: "0.75rem" }}
+      >
+        {text.trimEnd()}
+      </SyntaxHighlighter>
     </div>
   );
 }
@@ -360,17 +367,10 @@ export function ChatPanel({
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   ) : (
                     <>
-                      <div className="prose-chat">
+                      <div className="prose prose-sm prose-invert max-w-none prose-pre:p-0 prose-pre:bg-transparent [&>*:last-child]:mb-0">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
                           components={{
-                            h1: ({ children }) => <h1 className="text-base font-bold mb-2 mt-1">{children}</h1>,
-                            h2: ({ children }) => <h2 className="text-sm font-bold mb-1.5 mt-1">{children}</h2>,
-                            h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-1">{children}</h3>,
-                            p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
-                            ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-0.5">{children}</ul>,
-                            ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-0.5">{children}</ol>,
-                            li: ({ children }) => <li className="text-sm">{children}</li>,
                             code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
                               const isBlock = className?.startsWith("language-");
                               return isBlock ? (
