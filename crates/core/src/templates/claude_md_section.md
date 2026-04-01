@@ -8,8 +8,11 @@
 | 작업 | 사용 도구 |
 |------|-----------|
 | 문서 검색 | `nexus_search` (hybrid mode 기본) |
+| 날짜/태그 필터 검색 | `nexus_search` (query 없이 date_from/tags만 사용 가능) |
 | 전체 문서 읽기 | `nexus_get_document` |
+| 여러 문서 한번에 읽기 | `nexus_get_documents` (최대 5개) |
 | 특정 섹션만 | `nexus_get_section` (토큰 90% 절약) |
+| 여러 섹션 한번에 | `nexus_get_sections` (최대 20개, success/errors 맵 반환) |
 | 별칭으로 문서 찾기 | `nexus_resolve_alias` |
 | 역방향 링크 탐색 (1-hop) | `nexus_get_backlinks` |
 | 정방향 링크 탐색 (1-hop) | `nexus_get_links` |
@@ -20,8 +23,11 @@
 ### 검색 전략
 
 1. `nexus_search(query, mode="hybrid")` → 자연어 검색
-2. `nexus_get_section(path, heading)` → 필요한 섹션만 읽기
-3. `nexus_get_cluster(path, depth=2)` → 멀티홉 관련 문서 탐색
+2. `nexus_search(date_from="2026-01-01", sort_by="date_desc")` → 날짜 기준 필터 (query 생략 가능)
+3. `nexus_search(tags=["devlog"], tag_match_all=false)` → 태그 필터 (OR/AND 모드)
+4. `nexus_search(offset=20)` → 다음 페이지
+5. `nexus_get_section(path, heading)` → 필요한 섹션만 읽기
+6. `nexus_get_cluster(path, depth=2)` → 멀티홉 관련 문서 탐색
 
 ### 폴백 규칙
 

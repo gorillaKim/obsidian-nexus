@@ -10,6 +10,7 @@ const NEXUS_HELP_TEXT: &str = r#"# Obsidian Nexus MCP — Available Tools
 ## Document Access
 - **nexus_get_document** — Get full document content by path
 - **nexus_get_section** — Get a specific section by heading (token-efficient!)
+- **nexus_get_sections** — Get multiple sections from a document in one call (returns success/errors map)
 - **nexus_get_metadata** — Get frontmatter, tags, indexing status
 
 ## Graph Navigation
@@ -114,21 +115,42 @@ fn handle_tools_list(id: &Value) -> Value {
             "tools": [
                 {
                     "name": "nexus_search",
-                    "description": "Search across indexed Obsidian documents (hybrid/keyword/vector modes with metadata reranking)",
+                    "description": "Search across indexed Obsidian documents (hybrid/keyword/vector modes with metadata reranking). query is optional — omit it to use filter-only mode (date + tag).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "query": { "type": "string", "description": "Search query" },
+                            "query": { "type": "string", "description": "Search query (optional — omit for filter-only mode using date/tag)" },
                             "project": { "type": "string", "description": "Project name or ID (optional, searches all if omitted)" },
                             "limit": { "type": "integer", "description": "Max results (default: 20)", "default": 20 },
+                            "offset": { "type": "integer", "description": "Pagination offset (default: 0). Use offset += limit to get the next page.", "default": 0 },
                             "mode": { "type": "string", "description": "Search mode: hybrid (default), keyword, vector", "default": "hybrid" },
                             "enrich": { "type": "boolean", "description": "Include metadata (tags, backlink_count, view_count, last_modified) in results (default: true)", "default": true },
                             "use_popularity": { "type": "boolean", "description": "Boost results by popularity. Default: true if project specified, false otherwise" },
                             "tags": { "type": "array", "items": { "type": "string" }, "description": "Filter results by tags (optional)" },
                             "tag_match_all": { "type": "boolean", "description": "If true, require ALL tags to match (AND). Default false (OR).", "default": false },
+                            "date_from": { "type": "string", "description": "Filter: date range start (ISO 8601, e.g. '2025-01-01' or '2025-01-01T00:00:00')" },
+                            "date_to": { "type": "string", "description": "Filter: date range end inclusive (ISO 8601, e.g. '2025-12-31')" },
+                            "date_field": { "type": "string", "description": "Date field to filter on: last_modified (default) | created_at", "default": "last_modified" },
+                            "sort_by": { "type": "string", "description": "Sort order: relevance (default) | date_desc | date_asc. Use date_desc when date filter is active.", "default": "relevance" },
                             "rewrite_query": { "type": "boolean", "description": "LLM으로 쿼리를 재작성하여 도메인 용어 매칭 향상 (Ollama 필요, config.llm.enabled 또는 이 파라미터로 활성화)", "default": false }
                         },
-                        "required": ["query"]
+                        "required": []
+                    }
+                },
+                {
+                    "name": "nexus_get_documents",
+                    "description": "Read multiple documents (up to 5) in one call. Use file_path values from nexus_search results directly.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "paths": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "List of document paths (max 5). Accepts file_path from search results."
+                            },
+                            "project": { "type": "string", "description": "Project name or ID (required when paths are relative)" }
+                        },
+                        "required": ["paths"]
                     }
                 },
                 {
@@ -196,6 +218,31 @@ fn handle_tools_list(id: &Value) -> Value {
                             "heading_path": { "type": "string", "description": "Full heading path from TOC (e.g. 'Parent > Child'), used to disambiguate duplicate headings" }
                         },
                         "required": ["project", "path", "heading"]
+                    }
+                },
+                {
+                    "name": "nexus_get_sections",
+                    "description": "Get multiple sections from a document in one call. Returns {success: {heading: content}, errors: {heading: error}}.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "project": { "type": "string", "description": "Project name or ID" },
+                            "path": { "type": "string", "description": "File path relative to vault root" },
+                            "headings": {
+                                "type": "array",
+                                "description": "List of sections to extract (max 20)",
+                                "maxItems": 20,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "heading": { "type": "string", "description": "Heading text to extract" },
+                                        "heading_path": { "type": "string", "description": "Full heading path from TOC (e.g. 'Parent > Child') to disambiguate duplicate headings" }
+                                    },
+                                    "required": ["heading"]
+                                }
+                            }
+                        },
+                        "required": ["project", "path", "headings"]
                     }
                 },
                 {
@@ -347,11 +394,13 @@ fn handle_tools_call(id: &Value, params: &Value, pool: &nexus_core::db::sqlite::
         "nexus_search" => tool_search(&args, pool),
         "nexus_list_projects" => tool_list_projects(pool),
         "nexus_get_document" => tool_get_document(&args, pool),
+        "nexus_get_documents" => tool_get_documents(&args, pool),
         "nexus_get_metadata" => tool_get_metadata(&args, pool),
         "nexus_list_documents" => tool_list_documents(&args, pool),
         "nexus_index_project" => tool_index_project(&args, pool),
         "nexus_sync_config" => tool_sync_config(&args, pool),
         "nexus_get_section" => tool_get_section(&args, pool),
+        "nexus_get_sections" => tool_get_sections(&args, pool),
         "nexus_get_toc" => tool_get_toc(&args, pool),
         "nexus_get_backlinks" => tool_get_backlinks(&args, pool),
         "nexus_get_links" => tool_get_links(&args, pool),
@@ -386,12 +435,12 @@ fn handle_tools_call(id: &Value, params: &Value, pool: &nexus_core::db::sqlite::
 }
 
 fn tool_search(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
-    let query = args.get("query").and_then(|q| q.as_str()).ok_or("Missing 'query'")?;
+    let query = args.get("query").and_then(|q| q.as_str());
     let project = args.get("project").and_then(|p| p.as_str());
     let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(20) as usize;
+    let offset = args.get("offset").and_then(|o| o.as_u64()).unwrap_or(0) as usize;
     let mode = args.get("mode").and_then(|m| m.as_str()).unwrap_or("hybrid");
     let enrich = args.get("enrich").and_then(|e| e.as_bool()).unwrap_or(true);
-    // Default use_popularity: true if project filter, false otherwise
     let use_popularity = args.get("use_popularity").and_then(|u| u.as_bool())
         .unwrap_or(project.is_some());
 
@@ -402,7 +451,7 @@ fn tool_search(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::resu
         None
     };
 
-    // 태그 필터 준비 (검색 전)
+    // 태그 필터
     let tag_strings: Vec<String> = args.get("tags")
         .and_then(|t| t.as_array())
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
@@ -414,37 +463,123 @@ fn tool_search(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::resu
         Some(nexus_core::search::TagFilter::new(tag_strings, match_all))
     };
 
+    // 날짜 필터
+    let date_from = args.get("date_from").and_then(|v| v.as_str()).map(str::to_string);
+    let date_to = args.get("date_to").and_then(|v| v.as_str()).map(str::to_string);
+    let date_field = match args.get("date_field").and_then(|v| v.as_str()).unwrap_or("last_modified") {
+        "created_at" => nexus_core::search::DateField::CreatedAt,
+        _ => nexus_core::search::DateField::LastModified,
+    };
+    let date_filter = if date_from.is_some() || date_to.is_some() {
+        Some(nexus_core::search::DateFilter { date_from, date_to, field: date_field })
+    } else {
+        None
+    };
+
+    // sort_by
+    let sort_by = match args.get("sort_by").and_then(|v| v.as_str()).unwrap_or("relevance") {
+        "date_desc" => nexus_core::search::SortBy::DateDesc,
+        "date_asc" => nexus_core::search::SortBy::DateAsc,
+        _ => nexus_core::search::SortBy::Relevance,
+    };
+
+    // date filter 사용 시 last_modified 자동 포함을 위해 enrich 강제
+    let force_enrich_lm = date_filter.is_some();
+
     let mut config = nexus_core::Config::load().unwrap_or_default();
-    // rewrite_query 파라미터로 per-request LLM 재작성 활성화 가능
     let rewrite_query_param = args.get("rewrite_query").and_then(|v| v.as_bool()).unwrap_or(false);
     if rewrite_query_param {
         config.llm.enabled = true;
     }
 
-    // LLM query rewriting — keyword/vector/hybrid 모든 모드에 공통 적용
-    let effective_query: String = if config.llm.enabled {
-        nexus_core::llm::rewrite_query(&config, query)
-            .unwrap_or_else(|_| query.to_string())
+    let mut results = if let Some(q) = query {
+        // query 있음 — 일반 검색
+        let effective_query: String = if config.llm.enabled {
+            nexus_core::llm::rewrite_query(&config, q).unwrap_or_else(|_| q.to_string())
+        } else {
+            q.to_string()
+        };
+        let search_query = effective_query.as_str();
+
+        match mode {
+            "keyword" => nexus_core::search::fts_search(pool, search_query, resolved_pid.as_deref(), limit, offset, tag_filter.as_ref(), date_filter.as_ref())
+                .map_err(|e| e.to_string())?,
+            "vector" => nexus_core::search::vector_search(pool, search_query, resolved_pid.as_deref(), limit, offset, &config, tag_filter.as_ref(), date_filter.as_ref())
+                .map_err(|e| e.to_string())?,
+            _ => nexus_core::search::hybrid_search(pool, search_query, resolved_pid.as_deref(), limit, offset, &config, tag_filter.as_ref(), date_filter.as_ref())
+                .map_err(|e| e.to_string())?,
+        }
     } else {
-        query.to_string()
-    };
-    let search_query = effective_query.as_str();
-
-    let mut results = match mode {
-        "keyword" => nexus_core::search::fts_search(pool, search_query, resolved_pid.as_deref(), limit, tag_filter.as_ref())
-            .map_err(|e| e.to_string())?,
-        "vector" => nexus_core::search::vector_search(pool, search_query, resolved_pid.as_deref(), limit, &config, tag_filter.as_ref())
-            .map_err(|e| e.to_string())?,
-        _ => nexus_core::search::hybrid_search(pool, search_query, resolved_pid.as_deref(), limit, &config, tag_filter.as_ref())
-            .map_err(|e| e.to_string())?,
+        // filter-only 모드: date + tag만으로 검색
+        nexus_core::search::filter_search(pool, resolved_pid.as_deref(), limit, offset, tag_filter.as_ref(), date_filter.as_ref(), sort_by)
+            .map_err(|e| e.to_string())?
     };
 
-    if enrich {
+    if enrich || force_enrich_lm {
         nexus_core::search::enrich_results(pool, &mut results, use_popularity)
             .map_err(|e| e.to_string())?;
     }
 
-    serde_json::to_string_pretty(&results).map_err(|e| e.to_string())
+    // has_more: limit+1개 조회해서 판단하는 대신, limit개 반환 시 has_more=true로 추정
+    let has_more = results.len() == limit;
+    let response = serde_json::json!({
+        "results": results,
+        "meta": {
+            "total_returned": results.len(),
+            "offset": offset,
+            "has_more": has_more
+        }
+    });
+    serde_json::to_string_pretty(&response).map_err(|e| e.to_string())
+}
+
+fn tool_get_documents(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
+    let paths: Vec<&str> = args.get("paths")
+        .and_then(|p| p.as_array())
+        .ok_or("Missing 'paths'")?
+        .iter()
+        .filter_map(|v| v.as_str())
+        .take(5)
+        .collect();
+
+    if paths.is_empty() {
+        return Err("'paths' must be a non-empty array".to_string());
+    }
+
+    let project = args.get("project").and_then(|p| p.as_str());
+
+    let mut success: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut errors: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    for path in paths {
+        // path 형식: "project_name/relative/path.md" 또는 절대경로
+        let (proj_id, file_path) = if let Some(p) = project {
+            // project 파라미터 제공됨 — path를 그대로 file_path로 사용
+            match nexus_core::project::get_project(pool, p) {
+                Ok(proj) => (proj.id, path.to_string()),
+                Err(e) => { errors.insert(path.to_string(), e.to_string()); continue; }
+            }
+        } else {
+            // project 없음 — path에서 첫 세그먼트를 project 이름으로 해석
+            let parts: Vec<&str> = path.splitn(2, '/').collect();
+            if parts.len() < 2 {
+                errors.insert(path.to_string(), "Cannot resolve project: provide 'project' param or use 'project/path' format".to_string());
+                continue;
+            }
+            match nexus_core::project::get_project(pool, parts[0]) {
+                Ok(proj) => (proj.id, parts[1].to_string()),
+                Err(e) => { errors.insert(path.to_string(), e.to_string()); continue; }
+            }
+        };
+
+        match nexus_core::search::get_document_content(pool, &proj_id, &file_path) {
+            Ok(content) => { success.insert(path.to_string(), content); }
+            Err(e) => { errors.insert(path.to_string(), e.to_string()); }
+        }
+    }
+
+    let response = serde_json::json!({ "success": success, "errors": errors });
+    serde_json::to_string_pretty(&response).map_err(|e| e.to_string())
 }
 
 fn tool_list_projects(pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
@@ -478,6 +613,23 @@ fn tool_get_section(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std:
     let heading_path = args.get("heading_path").and_then(|h| h.as_str());
     let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
     nexus_core::search::get_section(pool, &proj.id, path, heading, heading_path).map_err(|e| e.to_string())
+}
+
+fn tool_get_sections(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {
+    let project = args.get("project").and_then(|v| v.as_str()).ok_or("Missing 'project'")?;
+    let path    = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path'")?;
+    let raw = args.get("headings").and_then(|v| v.as_array()).ok_or("Missing 'headings'")?;
+    let requests: Vec<nexus_core::search::SectionRequest> = raw.iter()
+        .filter_map(|v| v.get("heading").and_then(|h| h.as_str()).map(|h| nexus_core::search::SectionRequest {
+            heading: h,
+            heading_path: v.get("heading_path").and_then(|p| p.as_str()),
+        }))
+        .collect();
+    let proj = nexus_core::project::get_project(pool, project).map_err(|e| e.to_string())?;
+    let (success, errors) = nexus_core::search::get_sections(pool, &proj.id, path, &requests)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&serde_json::json!({ "success": success, "errors": errors }))
+        .map_err(|e| e.to_string())
 }
 
 fn tool_get_toc(args: &Value, pool: &nexus_core::db::sqlite::DbPool) -> std::result::Result<String, String> {

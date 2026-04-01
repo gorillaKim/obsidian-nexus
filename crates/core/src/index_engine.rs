@@ -9,6 +9,66 @@ use crate::error::{NexusError, Result};
 use crate::indexer;
 use crate::project;
 
+/// Frontmatter의 날짜 필드(created, updated, date)를 검사하여
+/// 유효하지 않은 값이 있으면 오늘 날짜로 교체한 새 content를 반환한다.
+/// 변경이 없으면 None을 반환한다.
+fn sanitize_frontmatter_dates(content: &str) -> Option<String> {
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+
+    // chrono::NaiveDate로 실제 유효한 날짜인지 검사 (2026-02-31 같은 불가능한 날짜도 거부)
+    fn is_valid_date(v: &str) -> bool {
+        let v = v.trim().trim_matches('"').trim_matches('\'');
+        // YYYY-MM-DD 앞 10자만 추출 (멀티바이트 안전, YYYY-MM-DDThh:mm:ss 형식도 허용)
+        let date_part: String = v.chars().take(10).collect();
+        chrono::NaiveDate::parse_from_str(&date_part, "%Y-%m-%d").is_ok()
+    }
+
+    let trimmed = content.trim_start();
+    if !trimmed.starts_with("---") {
+        return None;
+    }
+    let after_open = &trimmed[3..];
+    let end = after_open.find("\n---")?;
+    let fm_block = &after_open[..end];
+
+    let date_fields = ["created", "updated", "date"];
+    let mut new_fm = fm_block.to_string();
+    let mut changed = false;
+
+    for field in &date_fields {
+        // 패턴: "field: <value>" (줄 단위)
+        for line in fm_block.lines() {
+            let trimmed_line = line.trim();
+            let prefix = format!("{}:", field);
+            if trimmed_line.starts_with(&prefix) {
+                let value_part = trimmed_line[prefix.len()..].trim();
+                if !value_part.is_empty() && !is_valid_date(value_part) {
+                    let old_line = line.to_string();
+                    // 원래 들여쓰기 보존
+                    let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+                    let new_line = format!("{}{}: \"{}\"", indent, field, today);
+                    new_fm = new_fm.replacen(&old_line, &new_line, 1);
+                    tracing::warn!("Invalid date in frontmatter field '{}': '{}' → replaced with today ({})", field, value_part, today);
+                    changed = true;
+                }
+                break;
+            }
+        }
+    }
+
+    if !changed {
+        return None;
+    }
+
+    // 원본 content에서 frontmatter 블록만 교체
+    let prefix_len = content.len() - trimmed.len(); // trim_start로 제거된 앞 공백
+    let fm_start = prefix_len + 3; // "---" 이후
+    let fm_end = fm_start + end;
+    let mut result = content.to_string();
+    result.replace_range(fm_start..fm_end, &new_fm);
+    Some(result)
+}
+
 /// Index a single project (incremental: skip unchanged files)
 pub fn index_project(pool: &DbPool, project_id: &str, full: bool) -> Result<IndexReport> {
     let proj = project::get_project(pool, project_id)?;
@@ -50,6 +110,19 @@ pub fn index_project(pool: &DbPool, project_id: &str, full: bool) -> Result<Inde
             }
         };
 
+        // Sanitize invalid frontmatter dates → fix in-place and update file
+        let (content, date_sanitized) = if let Some(fixed) = sanitize_frontmatter_dates(&content) {
+            if std::fs::write(abs_path, &fixed).is_ok() {
+                (fixed, true)
+            } else {
+                // 파일 쓰기 실패 시 원본 사용 — DB와 파일 불일치 방지
+                tracing::warn!("Failed to write sanitized dates back to {}", rel_path);
+                (content, false)
+            }
+        } else {
+            (content, false)
+        };
+
         // Check if file changed (content hash comparison)
         let new_hash = indexer::compute_hash(&content);
         if !full {
@@ -61,8 +134,23 @@ pub fn index_project(pool: &DbPool, project_id: &str, full: bool) -> Result<Inde
             }
         }
 
+        // Get file modification time for date-based filtering
+        // If frontmatter dates were sanitized, use today as last_modified
+        let last_modified = if date_sanitized {
+            Some(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string())
+        } else {
+            abs_path.metadata().ok()
+                .and_then(|m| m.modified().ok())
+                .map(|t| {
+                    let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                    let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(secs as i64, 0)
+                        .unwrap_or_default();
+                    dt.format("%Y-%m-%dT%H:%M:%S").to_string()
+                })
+        };
+
         // UoW: index this file atomically
-        match index_single_file(pool, &proj.id, &proj.name, &rel_path, &content, &new_hash, &config) {
+        match index_single_file(pool, &proj.id, &proj.name, &rel_path, &content, &new_hash, last_modified.as_deref(), &config) {
             Ok(_) => report.indexed += 1,
             Err(e) => {
                 tracing::error!("Failed to index {}: {}", rel_path, e);
@@ -111,6 +199,7 @@ fn index_single_file(
     file_path: &str,
     content: &str,
     content_hash: &str,
+    last_modified: Option<&str>,
     config: &Config,
 ) -> Result<()> {
     let mut conn = pool.get()?;
@@ -279,9 +368,10 @@ fn index_single_file(
             content_hash = ?2,
             frontmatter = ?3,
             indexing_status = 'done',
-            last_indexed = CURRENT_TIMESTAMP
+            last_indexed = CURRENT_TIMESTAMP,
+            last_modified = ?5
          WHERE id = ?4",
-        params![parsed.title, content_hash, frontmatter_json, doc_id],
+        params![parsed.title, content_hash, frontmatter_json, doc_id, last_modified],
     )?;
 
     // Commit transaction — all or nothing

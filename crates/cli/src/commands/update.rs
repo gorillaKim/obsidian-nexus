@@ -58,11 +58,7 @@ fn touch_cache() {
 }
 
 fn asset_name() -> String {
-    let arch = match std::env::consts::ARCH {
-        "aarch64" => "aarch64",
-        "x86_64" => "x86_64",
-        other => other,
-    };
+    let arch = std::env::consts::ARCH;
     format!("nexus-cli-{}-{}.tar.gz", std::env::consts::OS, arch)
 }
 
@@ -259,7 +255,7 @@ fn binary_version(path: &std::path::Path) -> Option<String> {
     let text = String::from_utf8_lossy(&output.stdout);
     // Expected format: "obs-nexus 0.5.9" or just "0.5.9"
     text.split_whitespace()
-        .find(|s| s.chars().next().map_or(false, |c| c.is_ascii_digit()))
+        .find(|s| s.chars().next().is_some_and(|c| c.is_ascii_digit()))
         .map(|s| s.trim().to_string())
 }
 

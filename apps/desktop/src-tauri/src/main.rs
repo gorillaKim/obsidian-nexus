@@ -159,13 +159,13 @@ fn search_documents(
 
     let mut results = match mode {
         "keyword" => nexus_core::search::fts_search(
-            &state.pool, &query, resolved_pid.as_deref(), limit, tag_filter.as_ref(),
+            &state.pool, &query, resolved_pid.as_deref(), limit, 0, tag_filter.as_ref(), None,
         ).map_err(|e| e.to_string())?,
         "vector" => nexus_core::search::vector_search(
-            &state.pool, &query, resolved_pid.as_deref(), limit, &config, tag_filter.as_ref(),
+            &state.pool, &query, resolved_pid.as_deref(), limit, 0, &config, tag_filter.as_ref(), None,
         ).map_err(|e| e.to_string())?,
         _ => nexus_core::search::hybrid_search(
-            &state.pool, &query, resolved_pid.as_deref(), limit, &config, tag_filter.as_ref(),
+            &state.pool, &query, resolved_pid.as_deref(), limit, 0, &config, tag_filter.as_ref(), None,
         ).map_err(|e| e.to_string())?,
     };
 

@@ -44,6 +44,35 @@ impl TagFilter {
     }
 }
 
+/// 날짜 범위 필터
+#[derive(Debug, Clone)]
+pub struct DateFilter {
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    pub field: DateField,
+}
+
+impl Default for DateFilter {
+    fn default() -> Self {
+        Self { date_from: None, date_to: None, field: DateField::LastModified }
+    }
+}
+
+/// 날짜 필터 대상 컬럼
+#[derive(Debug, Clone)]
+pub enum DateField {
+    LastModified,
+    CreatedAt,
+}
+
+/// 정렬 방식
+#[derive(Debug, Clone)]
+pub enum SortBy {
+    Relevance,
+    DateDesc,
+    DateAsc,
+}
+
 /// 태그 이름 목록으로 매칭 document_id 조회.
 fn get_document_ids_by_tags(
     conn: &rusqlite::Connection,
@@ -108,6 +137,190 @@ fn get_document_ids_by_tags(
     Ok(Some(ids))
 }
 
+/// 날짜 범위로 매칭 document_id 조회.
+fn get_document_ids_by_date(
+    conn: &rusqlite::Connection,
+    date_filter: &DateFilter,
+    project_id: Option<&str>,
+) -> Result<Option<Vec<String>>> {
+    if date_filter.date_from.is_none() && date_filter.date_to.is_none() {
+        return Ok(None);
+    }
+
+    let col = match date_filter.field {
+        DateField::LastModified => "last_modified",
+        DateField::CreatedAt => "created_at",
+    };
+
+    let mut conditions: Vec<String> = Vec::new();
+    let mut params_boxed: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(ref from) = date_filter.date_from {
+        params_boxed.push(Box::new(from.clone()));
+        conditions.push(format!("{} >= ?", col));
+    }
+    if let Some(ref to) = date_filter.date_to {
+        // date_to 당일 포함: 날짜만 입력 시 다음날 00:00:00 미만으로 변환
+        let to_exclusive = if to.len() == 10 {
+            format!("{}T23:59:59", to)
+        } else {
+            to.clone()
+        };
+        params_boxed.push(Box::new(to_exclusive));
+        conditions.push(format!("{} <= ?", col));
+    }
+    if let Some(pid) = project_id {
+        params_boxed.push(Box::new(pid.to_string()));
+        conditions.push("project_id = ?".to_string());
+    }
+
+    let where_clause = conditions.join(" AND ");
+    let sql = format!("SELECT id FROM documents WHERE {}", where_clause);
+
+    let mut stmt = conn.prepare(&sql)?;
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params_boxed.iter().map(|b| b.as_ref()).collect();
+    let ids = stmt
+        .query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok(Some(ids))
+}
+
+/// 교집합 헬퍼: 두 id 집합을 AND로 합침. None은 "제한 없음"을 의미.
+fn intersect_id_sets(
+    a: Option<Vec<String>>,
+    b: Option<Vec<String>>,
+) -> Option<Vec<String>> {
+    match (a, b) {
+        (None, None) => None,
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (Some(a), Some(b)) => {
+            let set_b: std::collections::HashSet<String> = b.into_iter().collect();
+            Some(a.into_iter().filter(|id| set_b.contains(id)).collect())
+        }
+    }
+}
+
+/// filter_search: query 없이 날짜+태그 필터로 문서 목록 반환.
+#[allow(clippy::too_many_arguments)]
+pub fn filter_search(
+    pool: &DbPool,
+    project_id: Option<&str>,
+    limit: usize,
+    offset: usize,
+    tag_filter: Option<&TagFilter>,
+    date_filter: Option<&DateFilter>,
+    sort_by: SortBy,
+) -> Result<Vec<SearchResult>> {
+    let conn = pool.get()?;
+
+    // 태그 필터 → document_id 집합
+    let tag_ids = if let Some(tf) = tag_filter {
+        if !tf.is_empty() {
+            get_document_ids_by_tags(&conn, &tf.tags, project_id, tf.match_all)?
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // 날짜 필터 → document_id 집합
+    let date_ids = if let Some(df) = date_filter {
+        get_document_ids_by_date(&conn, df, project_id)?
+    } else {
+        None
+    };
+
+    // 교집합
+    let combined_ids = intersect_id_sets(tag_ids, date_ids);
+
+    // 결과가 비어있으면 조기 반환
+    if let Some(ref ids) = combined_ids {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+    }
+
+    // 정렬 컬럼
+    let order_clause = match sort_by {
+        SortBy::DateDesc => "d.last_modified DESC NULLS LAST",
+        SortBy::DateAsc => "d.last_modified ASC NULLS LAST",
+        SortBy::Relevance => "d.last_modified DESC NULLS LAST",
+    };
+
+    // 쿼리 구성
+    let mut conditions: Vec<String> = Vec::new();
+    let mut params_boxed: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(pid) = project_id {
+        params_boxed.push(Box::new(pid.to_string()));
+        conditions.push("d.project_id = ?".to_string());
+    }
+    if let Some(ref ids) = combined_ids {
+        let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        conditions.push(format!("d.id IN ({})", ph));
+        for id in ids {
+            params_boxed.push(Box::new(id.clone()));
+        }
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    let fetch_limit = limit + offset + 1;
+    let sql = format!(
+        "SELECT d.id, d.file_path, p.name, d.last_modified
+         FROM documents d
+         JOIN projects p ON d.project_id = p.id
+         {}
+         ORDER BY {}
+         LIMIT ?",
+        where_clause, order_clause
+    );
+
+    params_boxed.push(Box::new(fetch_limit as i64));
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params_boxed.iter().map(|b| b.as_ref()).collect();
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+        ))
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+
+    let results: Vec<SearchResult> = rows
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|(doc_id, file_path, project_name, last_modified)| SearchResult {
+            chunk_id: doc_id.clone(),
+            document_id: doc_id,
+            file_path,
+            project_name,
+            heading_path: None,
+            snippet: String::new(),
+            score: 0.0,
+            tags: None,
+            backlink_count: None,
+            view_count: None,
+            last_modified,
+            search_mode: None,
+        })
+        .collect();
+
+    Ok(results)
+}
+
 /// Sanitize a single token for use inside an FTS5 quoted phrase.
 /// Strips characters that can prematurely close or corrupt a quoted phrase
 /// even after `"` → `""` escaping: parentheses, caret, tilde.
@@ -135,12 +348,15 @@ fn build_prefix_fallback_query(query: &str) -> String {
 }
 
 /// FTS5 keyword search
+#[allow(clippy::too_many_arguments)]
 pub fn fts_search(
     pool: &DbPool,
     query: &str,
     project_id: Option<&str>,
     limit: usize,
+    offset: usize,
     tag_filter: Option<&TagFilter>,
+    date_filter: Option<&DateFilter>,
 ) -> Result<Vec<SearchResult>> {
     let conn = pool.get()?;
 
@@ -150,7 +366,7 @@ pub fn fts_search(
     }
 
     // 태그 사전 필터
-    let tag_doc_ids: Option<Vec<String>> = if let Some(tf) = tag_filter {
+    let tag_ids: Option<Vec<String>> = if let Some(tf) = tag_filter {
         if !tf.is_empty() {
             match get_document_ids_by_tags(&conn, &tf.tags, project_id, tf.match_all)? {
                 Some(ids) if ids.is_empty() => return Ok(vec![]),
@@ -162,6 +378,25 @@ pub fn fts_search(
     } else {
         None
     };
+
+    // 날짜 사전 필터
+    let date_ids: Option<Vec<String>> = if let Some(df) = date_filter {
+        match get_document_ids_by_date(&conn, df, project_id)? {
+            Some(ids) if ids.is_empty() => return Ok(vec![]),
+            other => other,
+        }
+    } else {
+        None
+    };
+
+    // 교집합
+    let combined_ids = intersect_id_sets(tag_ids, date_ids);
+    if let Some(ref ids) = combined_ids {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+    }
+    let tag_doc_ids = combined_ids;
 
     // Sanitize FTS5 query: short queries use prefix matching, longer ones use phrase matching
     // Also split underscored terms (wiki_links → "wiki_links" OR "wiki" OR "links")
@@ -238,13 +473,16 @@ pub fn fts_search(
             params_boxed.push(Box::new(id.clone()));
         }
     }
-    params_boxed.push(Box::new(limit as i64));
+    params_boxed.push(Box::new((limit + offset) as i64));
 
     let param_refs: Vec<&dyn rusqlite::types::ToSql> =
         params_boxed.iter().map(|b| b.as_ref()).collect();
     let mut stmt = conn.prepare(&sql)?;
-    let results = stmt.query_map(param_refs.as_slice(), map_result)?
+    let all_results = stmt.query_map(param_refs.as_slice(), map_result)?
         .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    // offset은 rerank-safe하게 Rust 레벨에서 적용
+    let results: Vec<SearchResult> = all_results.into_iter().skip(offset).take(limit).collect();
 
     Ok(results)
 }
@@ -376,13 +614,16 @@ pub struct DocumentMeta {
 }
 
 /// Vector similarity search using sqlite-vec KNN
+#[allow(clippy::too_many_arguments)]
 pub fn vector_search(
     pool: &DbPool,
     query: &str,
     project_id: Option<&str>,
     limit: usize,
+    offset: usize,
     config: &crate::config::Config,
     tag_filter: Option<&TagFilter>,
+    date_filter: Option<&DateFilter>,
 ) -> Result<Vec<SearchResult>> {
     // Generate and normalize query embedding
     let mut query_embedding = crate::embedding::embed_text(config, query)?;
@@ -392,12 +633,11 @@ pub fn vector_search(
     let conn = pool.get()?;
 
     // 태그 사전 필터
-    let tag_id_set: Option<std::collections::HashSet<String>> = if let Some(tf) = tag_filter {
+    let tag_ids: Option<Vec<String>> = if let Some(tf) = tag_filter {
         if !tf.is_empty() {
             match get_document_ids_by_tags(&conn, &tf.tags, project_id, tf.match_all)? {
                 Some(ids) if ids.is_empty() => return Ok(vec![]),
-                Some(ids) => Some(ids.into_iter().collect()),
-                None => None,
+                other => other,
             }
         } else {
             None
@@ -405,6 +645,25 @@ pub fn vector_search(
     } else {
         None
     };
+
+    // 날짜 사전 필터
+    let date_ids: Option<Vec<String>> = if let Some(df) = date_filter {
+        match get_document_ids_by_date(&conn, df, project_id)? {
+            Some(ids) if ids.is_empty() => return Ok(vec![]),
+            other => other,
+        }
+    } else {
+        None
+    };
+
+    let combined = intersect_id_sets(tag_ids, date_ids);
+    if let Some(ref ids) = combined {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+    }
+    let tag_id_set: Option<std::collections::HashSet<String>> =
+        combined.map(|ids| ids.into_iter().collect());
 
     // sqlite-vec KNN: fetch top-K*N candidates, then filter
     let fetch_limit = if tag_id_set.is_some() {
@@ -488,23 +747,29 @@ pub fn vector_search(
             search_mode: None,
         });
 
-        if results.len() >= limit {
+        if results.len() >= limit + offset {
             break;
         }
     }
+
+    // offset은 Rust 레벨에서 적용
+    let results: Vec<SearchResult> = results.into_iter().skip(offset).take(limit).collect();
 
     Ok(results)
 }
 
 /// Hybrid search: combine FTS5 keyword + vector similarity
 /// query rewriting은 호출자(tool_search)에서 수행한다 — 모든 검색 모드에 일관 적용.
+#[allow(clippy::too_many_arguments)]
 pub fn hybrid_search(
     pool: &DbPool,
     query: &str,
     project_id: Option<&str>,
     limit: usize,
+    offset: usize,
     config: &crate::config::Config,
     tag_filter: Option<&TagFilter>,
+    date_filter: Option<&DateFilter>,
 ) -> Result<Vec<SearchResult>> {
     // Dynamic weight: short queries lean toward keyword, long queries use configured weight
     let char_count = query.trim().chars().count();
@@ -516,11 +781,11 @@ pub fn hybrid_search(
         config.search.hybrid_weight // use configured weight as-is
     };
 
-    // Get keyword results
-    let keyword_results = fts_search(pool, query, project_id, limit * 2, tag_filter)?;
+    // Get keyword results (offset=0 here; applied after merge+rerank)
+    let keyword_results = fts_search(pool, query, project_id, limit * 2, 0, tag_filter, date_filter)?;
 
     // Get vector results (may fail if Ollama is not running)
-    let vector_results = match vector_search(pool, query, project_id, limit * 2, config, tag_filter) {
+    let vector_results = match vector_search(pool, query, project_id, limit * 2, 0, config, tag_filter, date_filter) {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("Vector search failed, falling back to keyword only: {}", e);
@@ -532,7 +797,7 @@ pub fn hybrid_search(
                 // Re-run FTS with prefix-match tokens for better recall on semantic queries,
                 // then merge: original exact-match results first, then any new prefix matches.
                 let fallback_query = build_prefix_fallback_query(query);
-                let prefix_results = fts_search(pool, &fallback_query, project_id, limit * 2, tag_filter)
+                let prefix_results = fts_search(pool, &fallback_query, project_id, limit * 2, 0, tag_filter, date_filter)
                     .unwrap_or_default();
                 let existing_ids: std::collections::HashSet<String> =
                     keyword_results.iter().map(|r| r.chunk_id.clone()).collect();
@@ -570,14 +835,21 @@ pub fn hybrid_search(
 
     let mut merged: Vec<(f64, SearchResult)> = scores.into_values().collect();
     merged.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    merged.truncate(limit);
+    merged.truncate(limit + offset);
 
-    let main_results: Vec<SearchResult> = merged.into_iter().map(|(score, mut r)| { r.score = score; r }).collect();
+    // offset은 rerank 후 Rust 레벨에서 적용
+    let main_results: Vec<SearchResult> = merged
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|(score, mut r)| { r.score = score; r })
+        .collect();
 
     Ok(main_results)
 }
 
 /// Enrich search results with metadata (tags, backlink_count, view_count, last_modified)
+#[allow(clippy::ptr_arg)]
 /// and optionally apply metadata-based reranking with title boost
 pub fn enrich_results(
     pool: &DbPool,
@@ -738,24 +1010,6 @@ pub fn enrich_results(
     Ok(())
 }
 
-/// Deprecated: 태그 필터링은 이제 검색 함수의 `tag_filter` 파라미터로 DB 레벨에서 수행됩니다.
-/// 이 함수는 하위 호환성을 위해 유지됩니다.
-#[deprecated(note = "Use tag_filter parameter in search functions instead")]
-pub fn filter_by_tags(results: &mut Vec<SearchResult>, tags: &[&str], match_all: bool) {
-    if tags.is_empty() { return; }
-    results.retain(|r| {
-        if let Some(ref result_tags) = r.tags {
-            if match_all {
-                tags.iter().all(|t| result_tags.iter().any(|rt| rt.eq_ignore_ascii_case(t)))
-            } else {
-                tags.iter().any(|t| result_tags.iter().any(|rt| rt.eq_ignore_ascii_case(t)))
-            }
-        } else {
-            false
-        }
-    });
-}
-
 /// Record a document view for popularity tracking.
 /// 같은 문서는 30분 이내 중복 기록하지 않음 (원자적 단일 쿼리로 TOCTOU 방지).
 pub fn record_view(pool: &DbPool, document_id: &str) -> Result<()> {
@@ -809,6 +1063,32 @@ pub fn get_toc(pool: &DbPool, project_id: &str, file_path: &str) -> Result<Vec<T
         .collect();
 
     Ok(entries)
+}
+
+/// A single section request specifying a heading and optional disambiguation path.
+pub struct SectionRequest<'a> {
+    pub heading: &'a str,
+    pub heading_path: Option<&'a str>,
+}
+
+/// Get multiple sections from a document in one call.
+/// Returns `(success, errors)` where each map is keyed by heading text.
+/// At most 20 requests are processed.
+pub fn get_sections(
+    pool: &DbPool,
+    project_id: &str,
+    file_path: &str,
+    requests: &[SectionRequest<'_>],
+) -> Result<(std::collections::BTreeMap<String, String>, std::collections::BTreeMap<String, String>)> {
+    let mut success = std::collections::BTreeMap::new();
+    let mut errors  = std::collections::BTreeMap::new();
+    for req in requests.iter().take(20) {
+        match get_section(pool, project_id, file_path, req.heading, req.heading_path) {
+            Ok(content) => { success.insert(req.heading.to_string(), content); }
+            Err(e)      => { errors.insert(req.heading.to_string(), e.to_string()); }
+        }
+    }
+    Ok((success, errors))
 }
 
 /// Get a specific section of a document by heading path
@@ -1500,7 +1780,7 @@ mod tests {
         let pool = test_pool();
         let proj = setup_indexed_project(&pool);
 
-        let results = fts_search(&pool, "rust", Some(&proj.id), 10, None).unwrap();
+        let results = fts_search(&pool, "rust", Some(&proj.id), 10, 0, None, None).unwrap();
         assert!(!results.is_empty(), "Should find 'rust' in indexed docs");
         assert!(results.iter().any(|r| r.file_path.contains("note1.md")));
     }
@@ -1510,7 +1790,7 @@ mod tests {
         let pool = test_pool();
         let proj = setup_indexed_project(&pool);
 
-        let results = fts_search(&pool, "한국어", Some(&proj.id), 10, None).unwrap();
+        let results = fts_search(&pool, "한국어", Some(&proj.id), 10, 0, None, None).unwrap();
         assert!(!results.is_empty(), "Should find Korean text");
         assert!(results.iter().any(|r| r.file_path.contains("korean.md")));
     }
@@ -1520,14 +1800,14 @@ mod tests {
         let pool = test_pool();
         let proj = setup_indexed_project(&pool);
 
-        let results = fts_search(&pool, "xyznonexistent", Some(&proj.id), 10, None).unwrap();
+        let results = fts_search(&pool, "xyznonexistent", Some(&proj.id), 10, 0, None, None).unwrap();
         assert!(results.is_empty());
     }
 
     #[test]
     fn test_fts_search_empty_query() {
         let pool = test_pool();
-        let results = fts_search(&pool, "", None, 10, None).unwrap();
+        let results = fts_search(&pool, "", None, 10, 0, None, None).unwrap();
         assert!(results.is_empty());
     }
 
@@ -1537,7 +1817,7 @@ mod tests {
         let _proj = setup_indexed_project(&pool);
 
         // Search without project filter
-        let results = fts_search(&pool, "programming", None, 10, None).unwrap();
+        let results = fts_search(&pool, "programming", None, 10, 0, None, None).unwrap();
         assert!(!results.is_empty());
     }
 
@@ -1546,7 +1826,7 @@ mod tests {
         let pool = test_pool();
         let proj = setup_indexed_project(&pool);
 
-        let results = fts_search(&pool, "ownership", Some(&proj.id), 10, None).unwrap();
+        let results = fts_search(&pool, "ownership", Some(&proj.id), 10, 0, None, None).unwrap();
         assert!(!results.is_empty());
         assert!(!results[0].snippet.is_empty(), "Snippet should not be empty");
     }
@@ -1556,7 +1836,7 @@ mod tests {
         let pool = test_pool();
         let proj = setup_indexed_project(&pool);
 
-        let results = fts_search(&pool, "ownership", Some(&proj.id), 10, None).unwrap();
+        let results = fts_search(&pool, "ownership", Some(&proj.id), 10, 0, None, None).unwrap();
         assert!(!results.is_empty());
         assert!(results[0].heading_path.is_some(), "Should have heading path");
     }
@@ -1566,7 +1846,7 @@ mod tests {
         let pool = test_pool();
         let proj = setup_indexed_project(&pool);
 
-        let results = fts_search(&pool, "note", Some(&proj.id), 1, None).unwrap();
+        let results = fts_search(&pool, "note", Some(&proj.id), 1, 0, None, None).unwrap();
         assert!(results.len() <= 1);
     }
 
@@ -1626,7 +1906,7 @@ mod tests {
         let _proj = setup_indexed_project(&pool);
 
         // FTS5 special operators should be safely handled
-        let results = fts_search(&pool, "content:password OR heading_path:secret", None, 10, None).unwrap();
+        let results = fts_search(&pool, "content:password OR heading_path:secret", None, 10, 0, None, None).unwrap();
         // Should not crash, may return empty
         let _ = results;
     }

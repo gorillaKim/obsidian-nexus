@@ -43,6 +43,19 @@ pub enum DocCommands {
         /// Heading text to extract
         heading: String,
     },
+    /// Extract multiple sections at once
+    Sections {
+        /// Project ID or name
+        project: String,
+        /// File path (relative to vault root)
+        path: String,
+        /// Heading text to extract (repeat for multiple: --heading "Intro" --heading "Usage")
+        #[arg(long = "heading", required = true)]
+        headings: Vec<String>,
+        /// Heading path to disambiguate duplicate headings (repeat in same order as --heading)
+        #[arg(long = "heading-path")]
+        heading_paths: Vec<String>,
+    },
     /// Get documents that link TO this document (backlinks)
     Backlinks {
         /// Project ID or name
@@ -76,11 +89,7 @@ pub fn handle(pool: &DbPool, cmd: DocCommands, format: &str) -> Result<()> {
         DocCommands::Meta { project, path } => {
             let proj = nexus_core::project::get_project(pool, &project)?;
             let meta = nexus_core::search::get_document_meta(pool, &proj.id, &path)?;
-            if format == "json" {
-                println!("{}", serde_json::to_string_pretty(&meta)?);
-            } else {
-                println!("{}", serde_json::to_string_pretty(&meta)?);
-            }
+            println!("{}", serde_json::to_string_pretty(&meta)?);
         }
         DocCommands::List { project, tags } => {
             let proj = nexus_core::project::get_project(pool, &project)?;
@@ -141,6 +150,26 @@ pub fn handle(pool: &DbPool, cmd: DocCommands, format: &str) -> Result<()> {
             let proj = nexus_core::project::get_project(pool, &project)?;
             let section = nexus_core::search::get_section(pool, &proj.id, &path, &heading, None)?;
             println!("{}", section);
+        }
+        DocCommands::Sections { project, path, headings, heading_paths } => {
+            let proj = nexus_core::project::get_project(pool, &project)?;
+            let requests: Vec<nexus_core::search::SectionRequest> = headings.iter().enumerate()
+                .map(|(i, h)| nexus_core::search::SectionRequest {
+                    heading: h,
+                    heading_path: heading_paths.get(i).map(String::as_str),
+                })
+                .collect();
+            let (success, errors) = nexus_core::search::get_sections(pool, &proj.id, &path, &requests)?;
+            if format == "json" {
+                println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "success": success, "errors": errors }))?);
+            } else {
+                for (heading, content) in &success {
+                    println!("=== {} ===\n{}", heading, content);
+                }
+                for (heading, err) in &errors {
+                    eprintln!("ERROR [{}]: {}", heading, err);
+                }
+            }
         }
         DocCommands::Backlinks { project, path } => {
             let proj = nexus_core::project::get_project(pool, &project)?;

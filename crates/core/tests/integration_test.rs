@@ -160,20 +160,20 @@ fn test_full_pipeline_project_to_search() {
     assert_eq!(report.skipped, 0); // .obsidian should not count as skipped .md
 
     // 3. FTS5 search — Korean
-    let results = search::fts_search(&pool, "소유권", Some(&proj.id), 10, None)
+    let results = search::fts_search(&pool, "소유권", Some(&proj.id), 10, 0, None, None)
         .expect("FTS search failed");
     assert!(!results.is_empty(), "Should find '소유권'");
     assert!(results[0].file_path.contains("rust-guide.md"));
     assert!(results[0].heading_path.as_ref().unwrap().contains("Ownership"));
 
     // 4. FTS5 search — English word
-    let results = search::fts_search(&pool, "Authentication", Some(&proj.id), 10, None)
+    let results = search::fts_search(&pool, "Authentication", Some(&proj.id), 10, 0, None, None)
         .expect("Search failed");
     assert!(!results.is_empty(), "Should find 'Authentication'");
     assert!(results[0].file_path.contains("security-notes.md"));
 
     // 5. Search without project filter (cross-project)
-    let results = search::fts_search(&pool, "Decorators", None, 10, None)
+    let results = search::fts_search(&pool, "Decorators", None, 10, 0, None, None)
         .expect("Cross-project search failed");
     assert!(!results.is_empty(), "Should find 'Decorators' across projects");
 
@@ -238,7 +238,7 @@ fn test_incremental_indexing() {
     assert_eq!(r3.unchanged, 3);
 
     // Search for new content
-    let results = search::fts_search(&pool, "async", Some(&proj.id), 10, None).unwrap();
+    let results = search::fts_search(&pool, "async", Some(&proj.id), 10, 0, None, None).unwrap();
     assert!(!results.is_empty(), "Should find updated content");
 }
 
@@ -315,7 +315,7 @@ fn test_subfolder_indexed() {
     assert!(docs.iter().any(|d| d.file_path.contains("daily/")));
 
     // Search in subfolder content
-    let results = search::fts_search(&pool, "subfolder", Some(&proj.id), 10, None).unwrap();
+    let results = search::fts_search(&pool, "subfolder", Some(&proj.id), 10, 0, None, None).unwrap();
     // The daily note may not contain "subfolder", so just verify the doc exists
     assert!(docs.iter().any(|d| d.file_path.starts_with("daily/")));
 }
@@ -328,7 +328,7 @@ fn test_search_snippet_and_heading() {
     index_engine::index_project(&pool, &proj.id, false).unwrap();
 
     // Use a word that's definitely in chunk content (heading_path is also indexed in FTS5)
-    let results = search::fts_search(&pool, "Borrowing", Some(&proj.id), 10, None).unwrap();
+    let results = search::fts_search(&pool, "Borrowing", Some(&proj.id), 10, 0, None, None).unwrap();
     assert!(!results.is_empty(), "Should find 'Borrowing'");
 
     let r = &results[0];
@@ -339,7 +339,7 @@ fn test_search_snippet_and_heading() {
 #[test]
 fn test_empty_query_returns_empty() {
     let (pool, _vault) = setup();
-    let results = search::fts_search(&pool, "", None, 10, None).unwrap();
+    let results = search::fts_search(&pool, "", None, 10, 0, None, None).unwrap();
     assert!(results.is_empty());
 }
 
@@ -368,7 +368,7 @@ fn test_tag_prefilter_fts_or_mode() {
     index_engine::index_project(&pool, &proj.id, false).unwrap();
 
     let tf = search::TagFilter::new(vec!["rust".to_string()], false);
-    let results = search::fts_search(&pool, "소유권 Authentication Decorators", Some(&proj.id), 10, Some(&tf)).unwrap();
+    let results = search::fts_search(&pool, "소유권 Authentication Decorators", Some(&proj.id), 10, 0, Some(&tf), None).unwrap();
     // Only rust-tagged document should appear
     assert!(!results.is_empty(), "Should find results with rust tag");
     assert!(results.iter().all(|r| r.file_path.contains("rust-guide.md")),
@@ -382,7 +382,7 @@ fn test_tag_prefilter_empty_when_no_match() {
     index_engine::index_project(&pool, &proj.id, false).unwrap();
 
     let tf = search::TagFilter::new(vec!["nonexistent-tag".to_string()], false);
-    let results = search::fts_search(&pool, "소유권", Some(&proj.id), 10, Some(&tf)).unwrap();
+    let results = search::fts_search(&pool, "소유권", Some(&proj.id), 10, 0, Some(&tf), None).unwrap();
     assert!(results.is_empty(), "Should return empty for non-existent tag");
 }
 
@@ -395,12 +395,12 @@ fn test_tag_prefilter_and_mode() {
     // rust-guide.md has tags: rust, programming
     // AND mode: both tags must match
     let tf = search::TagFilter::new(vec!["rust".to_string(), "programming".to_string()], true);
-    let results = search::fts_search(&pool, "소유권", Some(&proj.id), 10, Some(&tf)).unwrap();
+    let results = search::fts_search(&pool, "소유권", Some(&proj.id), 10, 0, Some(&tf), None).unwrap();
     assert!(!results.is_empty(), "Should find results with both rust AND programming tags");
 
     // AND mode with impossible combination
     let tf2 = search::TagFilter::new(vec!["rust".to_string(), "python".to_string()], true);
-    let results2 = search::fts_search(&pool, "소유권", Some(&proj.id), 10, Some(&tf2)).unwrap();
+    let results2 = search::fts_search(&pool, "소유권", Some(&proj.id), 10, 0, Some(&tf2), None).unwrap();
     assert!(results2.is_empty(), "No document has both rust AND python tags");
 }
 
@@ -450,7 +450,7 @@ MCP server implementation details.
     // Search "mcp-guide" with tag filter ["mcp"]
     // infra-setup.md has alias "mcp-guide" but no "mcp" tag — should be excluded
     let tf = search::TagFilter::new(vec!["mcp".to_string()], false);
-    let results = search::fts_search(&pool, "mcp-guide", Some(&proj.id), 10, Some(&tf)).unwrap();
+    let results = search::fts_search(&pool, "mcp-guide", Some(&proj.id), 10, 0, Some(&tf), None).unwrap();
 
     // All results must have the "mcp" tag — alias match without tag must be excluded
     for r in &results {
@@ -592,7 +592,7 @@ This document contains quarterly performance metrics and KPIs.
     index_engine::index_project(&pool, &proj.id, false).unwrap();
 
     // alias 키워드로 FTS 검색 → performance-report.md가 상위에 와야 함
-    let results = search::fts_search(&pool, "성과 리포트", Some(&proj.id), 10, None)
+    let results = search::fts_search(&pool, "성과 리포트", Some(&proj.id), 10, 0, None, None)
         .expect("FTS alias search failed");
     assert!(!results.is_empty(), "alias keyword search should return results");
     assert!(
@@ -631,7 +631,7 @@ Content about something else.
     let proj = project::add_project(&pool, "alias-score-test", vault.path().to_str().unwrap(), None).unwrap();
     index_engine::index_project(&pool, &proj.id, false).unwrap();
 
-    let results = search::fts_search(&pool, "검색엔진 검색 시스템", Some(&proj.id), 10, None)
+    let results = search::fts_search(&pool, "검색엔진 검색 시스템", Some(&proj.id), 10, 0, None, None)
         .expect("FTS search failed");
     assert!(results.len() >= 2, "should return both docs");
     assert!(
@@ -825,4 +825,219 @@ fn test_find_related_signals_populated() {
     for r in &related {
         assert!(!r.signals.is_empty(), "every related result must have at least one signal");
     }
+}
+
+// ── DateFilter + offset + filter_only tests (TDD: written before implementation) ─────
+
+/// Helper: setup pool + project + 3 indexed docs with known last_modified dates.
+fn setup_dated_project(pool: &DbPool) -> (nexus_core::project::Project, TempDir) {
+    let vault = TempDir::new().unwrap();
+    fs::write(vault.path().join("old-doc.md"), "---\ntitle: Old Doc\ntags:\n  - archive\n---\n# Old Doc\nOld content.\n").unwrap();
+    fs::write(vault.path().join("mid-doc.md"), "---\ntitle: Mid Doc\ntags:\n  - active\n---\n# Mid Doc\nMiddle content.\n").unwrap();
+    fs::write(vault.path().join("new-doc.md"), "---\ntitle: New Doc\ntags:\n  - active\n---\n# New Doc\nNew content.\n").unwrap();
+
+    let proj = project::add_project(pool, "dated-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(pool, &proj.id, false).unwrap();
+
+    // Patch last_modified to known values so date filters are deterministic
+    let conn = pool.get().unwrap();
+    conn.execute("UPDATE documents SET last_modified = '2024-01-01T00:00:00' WHERE file_path = 'old-doc.md' AND project_id = ?1", [&proj.id]).unwrap();
+    conn.execute("UPDATE documents SET last_modified = '2025-06-15T00:00:00' WHERE file_path = 'mid-doc.md' AND project_id = ?1", [&proj.id]).unwrap();
+    conn.execute("UPDATE documents SET last_modified = '2026-03-01T00:00:00' WHERE file_path = 'new-doc.md' AND project_id = ?1", [&proj.id]).unwrap();
+    drop(conn);
+
+    (proj, vault)
+}
+
+#[test]
+fn test_date_filter_from_only() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_dated_project(&pool);
+
+    let df = search::DateFilter {
+        date_from: Some("2025-01-01".to_string()),
+        date_to: None,
+        field: search::DateField::LastModified,
+    };
+    let results = search::filter_search(&pool, Some(&proj.id), 10, 0, None, Some(&df), search::SortBy::DateDesc).unwrap();
+
+    let paths: Vec<&str> = results.iter().map(|r| r.file_path.as_str()).collect();
+    assert!(paths.contains(&"mid-doc.md"), "mid-doc (2025-06) should be included");
+    assert!(paths.contains(&"new-doc.md"), "new-doc (2026-03) should be included");
+    assert!(!paths.contains(&"old-doc.md"), "old-doc (2024-01) should be excluded");
+}
+
+#[test]
+fn test_date_filter_range() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_dated_project(&pool);
+
+    let df = search::DateFilter {
+        date_from: Some("2025-01-01".to_string()),
+        date_to: Some("2025-12-31".to_string()),
+        field: search::DateField::LastModified,
+    };
+    let results = search::filter_search(&pool, Some(&proj.id), 10, 0, None, Some(&df), search::SortBy::DateDesc).unwrap();
+
+    let paths: Vec<&str> = results.iter().map(|r| r.file_path.as_str()).collect();
+    assert_eq!(paths.len(), 1, "only mid-doc should be in 2025");
+    assert!(paths.contains(&"mid-doc.md"));
+}
+
+#[test]
+fn test_date_tag_intersection() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_dated_project(&pool);
+
+    let df = search::DateFilter {
+        date_from: Some("2025-01-01".to_string()),
+        date_to: None,
+        field: search::DateField::LastModified,
+    };
+    let tf = search::TagFilter::new(vec!["active".to_string()], false);
+    let results = search::filter_search(&pool, Some(&proj.id), 10, 0, Some(&tf), Some(&df), search::SortBy::DateDesc).unwrap();
+
+    assert!(!results.is_empty());
+    assert!(results.iter().all(|r| r.file_path != "old-doc.md"), "old-doc excluded by date");
+
+    // archive tag + date >= 2025 → no results (old-doc is archive but 2024)
+    let tf2 = search::TagFilter::new(vec!["archive".to_string()], false);
+    let results2 = search::filter_search(&pool, Some(&proj.id), 10, 0, Some(&tf2), Some(&df), search::SortBy::DateDesc).unwrap();
+    assert!(results2.is_empty(), "archive tag + 2025+ date = no results");
+}
+
+#[test]
+fn test_fts_search_with_offset_pagination() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_dated_project(&pool);
+
+    let all = search::fts_search(&pool, "content", Some(&proj.id), 10, 0, None, None).unwrap();
+    if all.len() < 2 {
+        return;
+    }
+
+    let page1 = search::fts_search(&pool, "content", Some(&proj.id), 1, 0, None, None).unwrap();
+    assert_eq!(page1.len(), 1);
+
+    let page2 = search::fts_search(&pool, "content", Some(&proj.id), 1, 1, None, None).unwrap();
+    assert_eq!(page2.len(), 1);
+
+    assert_ne!(page1[0].chunk_id, page2[0].chunk_id, "offset must advance to a different result");
+}
+
+#[test]
+fn test_fts_search_with_date_filter() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_dated_project(&pool);
+
+    let df = search::DateFilter {
+        date_from: Some("2026-01-01".to_string()),
+        date_to: None,
+        field: search::DateField::LastModified,
+    };
+    let results = search::fts_search(&pool, "content", Some(&proj.id), 10, 0, None, Some(&df)).unwrap();
+
+    assert!(!results.is_empty(), "Should find new-doc content");
+    assert!(results.iter().all(|r| r.file_path == "new-doc.md"),
+        "Only new-doc (2026-03) should match, got: {:?}", results.iter().map(|r| &r.file_path).collect::<Vec<_>>());
+}
+
+#[test]
+fn test_filter_search_sort_date_desc() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_dated_project(&pool);
+
+    let results = search::filter_search(&pool, Some(&proj.id), 10, 0, None, None, search::SortBy::DateDesc).unwrap();
+    assert!(results.len() >= 2);
+
+    for i in 0..results.len() - 1 {
+        let a = results[i].last_modified.as_deref().unwrap_or("");
+        let b = results[i + 1].last_modified.as_deref().unwrap_or("");
+        assert!(a >= b, "Results should be sorted date desc: {} >= {}", a, b);
+    }
+}
+
+#[test]
+fn test_filter_search_offset() {
+    let pool = test_pool();
+    let (proj, _vault) = setup_dated_project(&pool);
+
+    let page1 = search::filter_search(&pool, Some(&proj.id), 1, 0, None, None, search::SortBy::DateDesc).unwrap();
+    let page2 = search::filter_search(&pool, Some(&proj.id), 1, 1, None, None, search::SortBy::DateDesc).unwrap();
+
+    assert_eq!(page1.len(), 1);
+    assert_eq!(page2.len(), 1);
+    assert_ne!(page1[0].document_id, page2[0].document_id, "offset must return a different document");
+}
+
+// ── get_sections tests ─────────────────────────────────────────────────────
+
+#[test]
+fn test_get_sections_basic() {
+    let (pool, vault) = setup();
+    let proj = project::add_project(&pool, "sections-basic-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    let requests = vec![
+        search::SectionRequest { heading: "Ownership", heading_path: None },
+        search::SectionRequest { heading: "Introduction", heading_path: None },
+    ];
+    let (success, errors) = search::get_sections(&pool, &proj.id, "rust-guide.md", &requests).unwrap();
+
+    assert!(success.contains_key("Ownership"), "Should find Ownership section");
+    assert!(success["Ownership"].contains("소유권"), "Ownership section should have content");
+    // Introduction may or may not exist — just verify no panic and keys are consistent
+    assert!(errors.len() + success.len() == 2, "Total results must equal request count");
+}
+
+#[test]
+fn test_get_sections_partial_failure() {
+    let (pool, vault) = setup();
+    let proj = project::add_project(&pool, "sections-partial-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    let requests = vec![
+        search::SectionRequest { heading: "Ownership", heading_path: None },
+        search::SectionRequest { heading: "NonExistentHeading12345", heading_path: None },
+    ];
+    let (success, errors) = search::get_sections(&pool, &proj.id, "rust-guide.md", &requests).unwrap();
+
+    assert!(success.contains_key("Ownership"), "Valid section should succeed");
+    assert!(errors.contains_key("NonExistentHeading12345"), "Missing section should be in errors");
+}
+
+#[test]
+fn test_get_sections_max_limit() {
+    let (pool, vault) = setup();
+    let proj = project::add_project(&pool, "sections-limit-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    // 25 requests — only first 20 should be processed
+    let requests: Vec<search::SectionRequest> = (0..25)
+        .map(|i| search::SectionRequest { heading: Box::leak(format!("Heading{}", i).into_boxed_str()), heading_path: None })
+        .collect();
+    let (success, errors) = search::get_sections(&pool, &proj.id, "rust-guide.md", &requests).unwrap();
+
+    assert!(success.len() + errors.len() <= 20, "Should process at most 20 requests");
+}
+
+#[test]
+fn test_get_sections_with_heading_path() {
+    let (pool, vault) = setup();
+    let proj = project::add_project(&pool, "sections-hp-test", vault.path().to_str().unwrap(), None).unwrap();
+    index_engine::index_project(&pool, &proj.id, false).unwrap();
+
+    let toc = search::get_toc(&pool, &proj.id, "rust-guide.md").unwrap();
+    let ownership_entry = toc.iter().find(|e| e.heading == "Ownership").unwrap();
+
+    let requests = vec![
+        search::SectionRequest {
+            heading: &ownership_entry.heading,
+            heading_path: Some(&ownership_entry.heading_path),
+        },
+    ];
+    let (success, errors) = search::get_sections(&pool, &proj.id, "rust-guide.md", &requests).unwrap();
+
+    assert!(errors.is_empty(), "Should have no errors with valid heading_path");
+    assert!(success.contains_key("Ownership"), "Should find section by heading_path");
 }

@@ -6,9 +6,11 @@ pub fn handle_onboard(project_path: Option<&str>, force: bool) -> Result<()> {
 
     for step in &steps {
         match step.status {
-            StepStatus::Created => eprintln!("✅ {}: {}", step.name, step.message),
-            StepStatus::Skipped => eprintln!("⏭️  {}: {}", step.name, step.message),
-            StepStatus::Error   => eprintln!("❌ {}: {}", step.name, step.message),
+            StepStatus::Created   => eprintln!("✅ {}: {}", step.name, step.message),
+            StepStatus::Skipped   => eprintln!("⏭️  {}: {}", step.name, step.message),
+            StepStatus::Error     => eprintln!("❌ {}: {}", step.name, step.message),
+            StepStatus::Installed => eprintln!("📦 {}: {}", step.name, step.message),
+            StepStatus::Repaired  => eprintln!("🔧 {}: {}", step.name, step.message),
         }
     }
 

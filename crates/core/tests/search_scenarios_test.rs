@@ -210,7 +210,7 @@ Daily Active Users. 일간 활성 사용자 수.
 fn test_short_query_english_acronym() {
     let (pool, _vault, pid) = setup_work_kb();
 
-    let results = search::fts_search(&pool, "MAU", Some(&pid), 10, None).unwrap();
+    let results = search::fts_search(&pool, "MAU", Some(&pid), 10, 0, None, None).unwrap();
     assert!(
         !results.is_empty(),
         "짧은 영문 약어 'MAU' 검색 결과가 있어야 함"
@@ -227,7 +227,7 @@ fn test_short_query_english_acronym() {
 fn test_short_query_korean_two_chars() {
     let (pool, _vault, pid) = setup_work_kb();
 
-    let results = search::fts_search(&pool, "지표", Some(&pid), 10, None).unwrap();
+    let results = search::fts_search(&pool, "지표", Some(&pid), 10, 0, None, None).unwrap();
     assert!(
         !results.is_empty(),
         "짧은 한국어 '지표' 검색 결과가 있어야 함"
@@ -246,7 +246,7 @@ fn test_short_query_alias_exact_match() {
     let (pool, _vault, pid) = setup_work_kb();
     let config = Config::default();
 
-    let results = search::hybrid_search(&pool, "DAU", Some(&pid), 10, &config, None).unwrap();
+    let results = search::hybrid_search(&pool, "DAU", Some(&pid), 10, 0, &config, None, None).unwrap();
     assert!(
         !results.is_empty(),
         "alias 'DAU' hybrid 검색 결과가 있어야 함"
@@ -265,7 +265,7 @@ fn test_short_query_alias_exact_match() {
 fn test_sentence_query_korean_domain() {
     let (pool, _vault, pid) = setup_work_kb();
 
-    let results = search::fts_search(&pool, "대시보드 분석 리포트 페이지", Some(&pid), 10, None).unwrap();
+    let results = search::fts_search(&pool, "대시보드 분석 리포트 페이지", Some(&pid), 10, 0, None, None).unwrap();
     assert!(
         !results.is_empty(),
         "문장 쿼리 검색 결과가 있어야 함"
@@ -291,7 +291,7 @@ fn test_sentence_query_alias_token_matching() {
     // hybrid_search 내부의 resolve_alias_results가
     // "overview 페이지 리뉴얼"을 토큰으로 분리하여
     // "overview" alias를 가진 performance-report를 찾아야 함
-    let results = search::hybrid_search(&pool, "overview 페이지 리뉴얼", Some(&pid), 10, &config, None).unwrap();
+    let results = search::hybrid_search(&pool, "overview 페이지 리뉴얼", Some(&pid), 10, 0, &config, None, None).unwrap();
     assert!(
         !results.is_empty(),
         "alias 토큰 매칭으로 검색 결과가 있어야 함"
@@ -312,7 +312,7 @@ fn test_sentence_query_single_alias_token() {
     let (pool, _vault, pid) = setup_work_kb();
     let config = Config::default();
 
-    let results = search::hybrid_search(&pool, "overview", Some(&pid), 10, &config, None).unwrap();
+    let results = search::hybrid_search(&pool, "overview", Some(&pid), 10, 0, &config, None, None).unwrap();
     assert!(
         !results.is_empty(),
         "alias 'overview' 검색 결과가 있어야 함"
@@ -329,7 +329,7 @@ fn test_sentence_query_single_alias_token() {
 fn test_sentence_query_english_technical() {
     let (pool, _vault, pid) = setup_work_kb();
 
-    let results = search::fts_search(&pool, "performance report dashboard", Some(&pid), 10, None).unwrap();
+    let results = search::fts_search(&pool, "performance report dashboard", Some(&pid), 10, 0, None, None).unwrap();
     assert!(
         !results.is_empty(),
         "영문 문장 쿼리 검색 결과가 있어야 함"
@@ -350,7 +350,7 @@ fn test_sentence_query_english_technical() {
 fn test_sentence_query_irrelevant_does_not_pollute_top() {
     let (pool, _vault, pid) = setup_work_kb();
 
-    let results = search::fts_search(&pool, "소유권 빌림 lifetime", Some(&pid), 10, None).unwrap();
+    let results = search::fts_search(&pool, "소유권 빌림 lifetime", Some(&pid), 10, 0, None, None).unwrap();
     // 없거나 있어도 관련 없는 문서만 나와야 함 — performance-report가 top1이면 안 됨
     if !results.is_empty() {
         assert!(
@@ -367,7 +367,7 @@ fn test_sentence_query_irrelevant_does_not_pollute_top() {
 fn test_mixed_korean_english_query() {
     let (pool, _vault, pid) = setup_work_kb();
 
-    let results = search::fts_search(&pool, "BigQuery 파이프라인", Some(&pid), 10, None).unwrap();
+    let results = search::fts_search(&pool, "BigQuery 파이프라인", Some(&pid), 10, 0, None, None).unwrap();
     assert!(
         !results.is_empty(),
         "한영 혼합 쿼리 결과가 있어야 함"
@@ -385,7 +385,7 @@ fn test_mixed_query_security_terms() {
     let (pool, _vault, pid) = setup_work_kb();
 
     // 이 KB에는 security 문서가 없으므로 결과 없음이 정상
-    let results = search::fts_search(&pool, "JWT OAuth", Some(&pid), 10, None).unwrap();
+    let results = search::fts_search(&pool, "JWT OAuth", Some(&pid), 10, 0, None, None).unwrap();
     // 결과가 없거나 낮은 relevance여도 무관한 문서가 1위면 안 됨
     if !results.is_empty() {
         // 최소한 score가 음수여야 정상 (BM25 낮음)
@@ -405,7 +405,7 @@ fn test_alias_search_without_project_filter() {
     let (pool, _vault, _pid) = setup_work_kb();
     let config = Config::default();
 
-    let results = search::hybrid_search(&pool, "AI 리포트", None, 10, &config, None).unwrap();
+    let results = search::hybrid_search(&pool, "AI 리포트", None, 10, 0, &config, None, None).unwrap();
     assert!(
         !results.is_empty(),
         "프로젝트 필터 없이 alias '퍼포먼스 리포트' 검색 결과가 있어야 함"
@@ -426,7 +426,7 @@ fn test_hybrid_search_with_llm_disabled() {
     assert!(!config.llm.enabled, "기본값은 llm.enabled=false여야 함");
 
     let results =
-        search::hybrid_search(&pool, "퍼포먼스 리포트 분석", Some(&pid), 10, &config, None).unwrap();
+        search::hybrid_search(&pool, "퍼포먼스 리포트 분석", Some(&pid), 10, 0, &config, None, None).unwrap();
     // Ollama 없어도 keyword fallback으로 결과 있어야 함
     assert!(
         !results.is_empty(),

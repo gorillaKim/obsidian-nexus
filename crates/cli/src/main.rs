@@ -43,8 +43,8 @@ enum Commands {
     },
     /// Search across indexed documents
     Search {
-        /// Search query
-        query: String,
+        /// Search query (optional — omit to use filter-only mode)
+        query: Option<String>,
         /// Limit to a specific project
         #[arg(long)]
         project: Option<String>,
@@ -54,6 +54,32 @@ enum Commands {
         /// Max results
         #[arg(long, default_value = "20")]
         limit: usize,
+        /// Pagination offset
+        #[arg(long, default_value = "0")]
+        offset: usize,
+        /// Filter: start date (ISO 8601, e.g. 2025-01-01)
+        #[arg(long)]
+        date_from: Option<String>,
+        /// Filter: end date inclusive (ISO 8601, e.g. 2025-12-31)
+        #[arg(long)]
+        date_to: Option<String>,
+        /// Sort order: relevance, date_desc, date_asc
+        #[arg(long, default_value = "relevance")]
+        sort_by: String,
+        /// Filter by tags (comma-separated, e.g. rust,devlog)
+        #[arg(long)]
+        tags: Option<String>,
+        /// Require ALL tags to match (AND mode). Default: OR
+        #[arg(long)]
+        tag_match_all: bool,
+    },
+    /// Read multiple documents at once (up to 5)
+    GetDocs {
+        /// File paths (space-separated, use project/path format or with --project)
+        paths: Vec<String>,
+        /// Project name or ID
+        #[arg(long)]
+        project: Option<String>,
     },
     /// Setup Obsidian Nexus (install dependencies, init DB)
     Setup,
@@ -115,7 +141,7 @@ fn main() -> Result<()> {
         return commands::setup::handle_setup();
     }
     if let Commands::Onboard { ref project_path, force } = cli.command {
-        return commands::onboard::handle_onboard(project_path.as_deref(), force).map_err(Into::into);
+        return commands::onboard::handle_onboard(project_path.as_deref(), force);
     }
     if let Commands::Update { check, force } = cli.command {
         return commands::update::handle_update(check, force, &cli.format);
@@ -134,8 +160,11 @@ fn main() -> Result<()> {
         Commands::Index { project, all, full } => {
             commands::index::handle_index(&pool, project.as_deref(), all, full, &cli.format)?;
         }
-        Commands::Search { query, project, mode, limit } => {
-            commands::search::handle_search(&pool, &query, project.as_deref(), limit, &mode, &cli.format)?;
+        Commands::Search { query, project, mode, limit, offset, date_from, date_to, sort_by, tags, tag_match_all } => {
+            commands::search::handle_search(&pool, query.as_deref(), project.as_deref(), limit, offset, &mode, &sort_by, date_from.as_deref(), date_to.as_deref(), tags.as_deref(), tag_match_all, &cli.format)?;
+        }
+        Commands::GetDocs { paths, project } => {
+            commands::search::handle_get_docs(&pool, &paths, project.as_deref(), &cli.format)?;
         }
         Commands::Doc { command } => {
             commands::doc::handle(&pool, command, &cli.format)?;
