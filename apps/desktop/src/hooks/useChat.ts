@@ -137,18 +137,36 @@ export function useChat(options: UseChatOptions = {}) {
     });
   }, [sessions]);
 
-  function updateLastAssistant(sessionId: string, content: string) {
+  // RAF-batched streaming updates: coalesce rapid text events into one render per frame
+  const pendingStreamRef = useRef<Map<string, string>>(new Map());
+  const rafIdRef = useRef<number | null>(null);
+
+  function flushStreamUpdates() {
+    rafIdRef.current = null;
+    const pending = pendingStreamRef.current;
+    if (pending.size === 0) return;
+    const snapshot = new Map(pending);
+    pending.clear();
     setMessages((prev) => {
-      const msgs = prev[sessionId] || [];
-      const last = msgs[msgs.length - 1];
-      if (last && last.role === "assistant") {
-        // Update existing assistant message
-        const updated = [...msgs];
-        updated[updated.length - 1] = { ...last, content };
-        return { ...prev, [sessionId]: updated };
+      let next = prev;
+      for (const [sid, content] of snapshot) {
+        const msgs = next[sid] || [];
+        const last = msgs[msgs.length - 1];
+        if (last && last.role === "assistant") {
+          const updated = [...msgs];
+          updated[updated.length - 1] = { ...last, content };
+          next = { ...next, [sid]: updated };
+        }
       }
-      return prev;
+      return next;
     });
+  }
+
+  function updateLastAssistant(sessionId: string, content: string) {
+    pendingStreamRef.current.set(sessionId, content);
+    if (rafIdRef.current === null) {
+      rafIdRef.current = requestAnimationFrame(flushStreamUpdates);
+    }
   }
 
   const detectAgents = useCallback(async () => {

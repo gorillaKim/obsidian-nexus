@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -65,6 +65,85 @@ function CodeBlock({ children, className, onCopy }: { children?: React.ReactNode
   );
 }
 
+interface MessageItemProps {
+  msg: import("../../types").ChatMessage;
+  onCopy: (text: string) => void;
+}
+
+const MessageItem = React.memo(function MessageItem({ msg, onCopy }: MessageItemProps) {
+  const handleCopyMessage = useCallback(async () => {
+    await navigator.clipboard.writeText(msg.content).catch(() => {});
+    onCopy("복사됨");
+  }, [msg.content, onCopy]);
+
+  const handleCodeCopy = useCallback(() => onCopy("복사됨"), [onCopy]);
+
+  const markdownComponents = useMemo(() => ({
+    code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
+      const isBlock = className?.startsWith("language-");
+      return isBlock ? (
+        <CodeBlock className={className} onCopy={handleCodeCopy}>{children}</CodeBlock>
+      ) : (
+        <code className="px-1 py-0.5 rounded text-xs font-mono bg-[var(--bg-primary)] text-[var(--accent)]">{children}</code>
+      );
+    },
+    pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+    table: ({ children }: { children?: React.ReactNode }) => <div className="overflow-x-auto my-2"><table className="w-full text-xs border-collapse border border-[var(--border)]">{children}</table></div>,
+    thead: ({ children }: { children?: React.ReactNode }) => <thead className="bg-[var(--bg-secondary)]">{children}</thead>,
+    tbody: ({ children }: { children?: React.ReactNode }) => <tbody>{children}</tbody>,
+    tr: ({ children }: { children?: React.ReactNode }) => <tr className="border-b border-[var(--border)] last:border-0">{children}</tr>,
+    th: ({ children }: { children?: React.ReactNode }) => <th className="px-3 py-1.5 text-left font-semibold text-[var(--text-primary)] border-r border-[var(--border)] last:border-0">{children}</th>,
+    td: ({ children }: { children?: React.ReactNode }) => <td className="px-3 py-1.5 text-[var(--text-secondary)] border-r border-[var(--border)] last:border-0">{children}</td>,
+    blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="border-l-2 border-[var(--accent)] pl-3 my-2 text-[var(--text-secondary)] italic">{children}</blockquote>,
+    strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold text-[var(--text-primary)]">{children}</strong>,
+    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => <a href={href} className="text-[var(--accent)] underline hover:opacity-80">{children}</a>,
+    hr: () => <hr className="border-[var(--border)] my-3" />,
+  }), [handleCodeCopy]);
+
+  return (
+    <div
+      className={`flex gap-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+    >
+      {msg.role === "assistant" && (
+        <div className="w-6 h-6 rounded-full bg-[var(--accent-muted)] flex items-center justify-center flex-shrink-0 mt-1">
+          <Bot size={12} className="text-[var(--accent)]" />
+        </div>
+      )}
+      <div
+        className={`relative group max-w-[80%] px-3 py-2 rounded-lg text-sm ${
+          msg.role === "user"
+            ? "bg-[var(--accent)] text-white"
+            : "bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
+        }`}
+      >
+        {msg.role === "user" ? (
+          <p className="whitespace-pre-wrap">{msg.content}</p>
+        ) : (
+          <>
+            <div className="prose prose-sm prose-invert max-w-none prose-pre:p-0 prose-pre:bg-transparent [&>*:last-child]:mb-0">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                {msg.content}
+              </ReactMarkdown>
+            </div>
+            <button
+              onClick={handleCopyMessage}
+              className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--bg-secondary)]"
+              title="메시지 복사"
+            >
+              <Copy size={11} className="text-[var(--text-tertiary)]" />
+            </button>
+          </>
+        )}
+      </div>
+      {msg.role === "user" && (
+        <div className="w-6 h-6 rounded-full bg-[var(--bg-tertiary)] flex items-center justify-center flex-shrink-0 mt-1">
+          <User size={12} className="text-[var(--text-secondary)]" />
+        </div>
+      )}
+    </div>
+  );
+});
+
 interface ChatPanelProps {
   onClose: () => void;
   currentProjectId?: string;
@@ -111,10 +190,10 @@ export function ChatPanel({
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 2000);
-  };
+  }, []);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -129,12 +208,20 @@ export function ChatPanel({
     return () => cancelAnimationFrame(raf);
   }, [detectAgents, loadSessions]);
 
+  const scrollRafRef = useRef<number | null>(null);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (scrollRafRef.current !== null) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    });
   }, [activeMessages]);
 
   // Claude + Gemini 지원 (설치된 에이전트만 표시)
-  const supportedAgents = agents.filter((a) => a.cli === "claude" || a.cli === "gemini");
+  const supportedAgents = useMemo(
+    () => agents.filter((a) => a.cli === "claude" || a.cli === "gemini"),
+    [agents]
+  );
 
   useEffect(() => {
     if (supportedAgents.length > 0 && !selectedCli) {
@@ -345,75 +432,7 @@ export function ChatPanel({
           /* Messages */
           <div className="space-y-4">
             {activeMessages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex gap-2 ${
-                  msg.role === "user" ? "justify-end" : "justify-start"
-                }`}
-              >
-                {msg.role === "assistant" && (
-                  <div className="w-6 h-6 rounded-full bg-[var(--accent-muted)] flex items-center justify-center flex-shrink-0 mt-1">
-                    <Bot size={12} className="text-[var(--accent)]" />
-                  </div>
-                )}
-                <div
-                  className={`relative group max-w-[80%] px-3 py-2 rounded-lg text-sm ${
-                    msg.role === "user"
-                      ? "bg-[var(--accent)] text-white"
-                      : "bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
-                  }`}
-                >
-                  {msg.role === "user" ? (
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                  ) : (
-                    <>
-                      <div className="prose prose-sm prose-invert max-w-none prose-pre:p-0 prose-pre:bg-transparent [&>*:last-child]:mb-0">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
-                              const isBlock = className?.startsWith("language-");
-                              return isBlock ? (
-                                <CodeBlock className={className} onCopy={() => showToast("복사됨")}>{children}</CodeBlock>
-                              ) : (
-                                <code className="px-1 py-0.5 rounded text-xs font-mono bg-[var(--bg-primary)] text-[var(--accent)]">{children}</code>
-                              );
-                            },
-                            pre: ({ children }) => <>{children}</>,
-                            table: ({ children }) => <div className="overflow-x-auto my-2"><table className="w-full text-xs border-collapse border border-[var(--border)]">{children}</table></div>,
-                            thead: ({ children }) => <thead className="bg-[var(--bg-secondary)]">{children}</thead>,
-                            tbody: ({ children }) => <tbody>{children}</tbody>,
-                            tr: ({ children }) => <tr className="border-b border-[var(--border)] last:border-0">{children}</tr>,
-                            th: ({ children }) => <th className="px-3 py-1.5 text-left font-semibold text-[var(--text-primary)] border-r border-[var(--border)] last:border-0">{children}</th>,
-                            td: ({ children }) => <td className="px-3 py-1.5 text-[var(--text-secondary)] border-r border-[var(--border)] last:border-0">{children}</td>,
-                            blockquote: ({ children }) => <blockquote className="border-l-2 border-[var(--accent)] pl-3 my-2 text-[var(--text-secondary)] italic">{children}</blockquote>,
-                            strong: ({ children }) => <strong className="font-semibold text-[var(--text-primary)]">{children}</strong>,
-                            a: ({ href, children }) => <a href={href} className="text-[var(--accent)] underline hover:opacity-80">{children}</a>,
-                            hr: () => <hr className="border-[var(--border)] my-3" />,
-                          }}
-                        >
-                          {msg.content}
-                        </ReactMarkdown>
-                      </div>
-                      <button
-                        onClick={async () => {
-                          await navigator.clipboard.writeText(msg.content).catch(() => {});
-                          showToast("복사됨");
-                        }}
-                        className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--bg-secondary)]"
-                        title="메시지 복사"
-                      >
-                        <Copy size={11} className="text-[var(--text-tertiary)]" />
-                      </button>
-                    </>
-                  )}
-                </div>
-                {msg.role === "user" && (
-                  <div className="w-6 h-6 rounded-full bg-[var(--bg-tertiary)] flex items-center justify-center flex-shrink-0 mt-1">
-                    <User size={12} className="text-[var(--text-secondary)]" />
-                  </div>
-                )}
-              </div>
+              <MessageItem key={msg.id} msg={msg} onCopy={showToast} />
             ))}
 
             {/* Status indicator */}
